@@ -4,3 +4,7 @@ dist/
 build/
 .env
 *.log
+.vscode
+
+# Local credentials for firmware sketches — see secrets.example.h
+secrets.h
