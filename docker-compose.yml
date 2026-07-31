@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: siot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: siot
+      POSTGRES_PASSWORD: siot
+      POSTGRES_DB: siot
+    # 5433 on the host: a native Postgres install already owns 5432 on this
+    # machine and would silently answer (and reject) our connections.
+    ports:
+      - '5433:5432'
+    volumes:
+      - siot-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U siot -d siot']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: siot-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - siot-redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  siot-pgdata:
+  siot-redisdata:
