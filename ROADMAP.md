@@ -83,17 +83,17 @@ Granular, ordered task list derived from `SIOT_Design_Document.md`. Check items 
 ## Phase 2 — Signup & Login Flow
 
 ### 2.1 Signup — client
-- [ ] Signup form UI (username, password, confirm password)
-- [ ] On submit: generate salt, derive master_key/login_key/kek, generate vault_key, wrap it
-- [ ] POST `/signup` with `{ username, salt, login_key, wrapped_vault_key }`
-- [ ] Clear password from memory/variables as soon as derivation is done (don't hold it longer than needed)
+- [x] Signup form UI (username, password, confirm password) — a panel in the plain-HTML test console, not React; 0.4 is still deferred
+- [x] On submit: generate salt, derive master_key/login_key/kek, generate vault_key, wrap it
+- [x] POST `/signup` with `{ username, salt, login_key, wrapped_vault_key }`
+- [x] Clear password from memory/variables as soon as derivation is done (don't hold it longer than needed) — inputs are cleared and every derived key is zeroed once the body is built. The password *string* itself cannot be wiped: JS strings are immutable and interned. That is a platform limit, not something to paper over
 
 ### 2.2 Signup — server
-- [ ] Route `POST /signup`: validate input shape (JSON schema)
-- [ ] Check username uniqueness
-- [ ] Server-side Argon2id hash of `login_key` (separate salt, server-generated)
-- [ ] Insert user row: username, salt, login_key_hash, wrapped_vault_key, vault_version=0
-- [ ] Return success (no session yet — require explicit login)
+- [x] Route `POST /signup`: validate input shape (JSON schema) — fixed-length base64url patterns, so a wrong-sized blob is a 400 before any handler runs. Also flipped Fastify's Ajv to `removeAdditional: false` globally: silently *stripping* an unexpected field is the wrong default when the field might be key material
+- [x] Check username uniqueness — via the unique index, not a pre-`SELECT`: a check-then-insert is a race two simultaneous signups both pass
+- [x] Server-side Argon2id hash of `login_key` (separate salt, server-generated) — `@node-rs/argon2`, m=19 MiB/t=2/p=1, salt generated internally per hash. Lighter than the client's m=64 MiB deliberately: the input here is already a 256-bit HKDF output, so cost buys nothing against brute force, and this runs on every login attempt
+- [x] Insert user row: username, salt, login_key_hash, wrapped_vault_key, vault_version=0 — username normalised to lowercase, ASCII-only charset so homoglyphs can't make two rows that look identical
+- [x] Return success (no session yet — require explicit login) — 201 `{ username }`, echoing the normalised form. Duplicate → 409, which does leak that the name exists; unavoidable for any signup form that refuses duplicates, and 2.3 is where the enumeration defence actually lives
 
 ### 2.3 Salt lookup with anti-enumeration
 - [ ] Route `GET /salt?username=` on server

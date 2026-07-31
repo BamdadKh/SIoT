@@ -6,6 +6,7 @@ import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { config, isDev } from './config.js';
 import { postgresPlugin } from './db/postgres.js';
 import { redisPlugin } from './db/redis.js';
+import { authRoutes } from './routes/auth.js';
 import { healthRoutes } from './routes/health.js';
 
 /**
@@ -43,6 +44,14 @@ export async function buildApp() {
     },
     // The wire protocol carries base64 blobs; keep a sane ceiling on record size.
     bodyLimit: 1024 * 1024,
+
+    // Fastify's Ajv defaults to `removeAdditional: true`, which silently strips
+    // properties an `additionalProperties: false` schema does not name. For this
+    // server that is the wrong default: a request carrying a field we never
+    // asked for means the client is out of spec, and the field it accidentally
+    // sent might be key material. Reject it visibly instead of quietly dropping
+    // it and returning 201.
+    ajv: { customOptions: { removeAdditional: false } },
     ...(config.tlsEnabled ? { https: loadTlsCredentials() } : {}),
   }).withTypeProvider<TypeBoxTypeProvider>();
 
@@ -63,6 +72,7 @@ export async function buildApp() {
   await app.register(redisPlugin);
 
   await app.register(healthRoutes);
+  await app.register(authRoutes);
 
   // Dev-only convenience: serve the plain-HTML test console from the API origin
   // so there is no CORS setup and session cookies will just work. The real

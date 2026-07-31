@@ -230,6 +230,36 @@
           <span class="label" style="font-size: 0.85rem" id="c-note"></span>
         </div>
       </section>
+
+      <section>
+        <h2>Signup (Phase 2)</h2>
+        <p class="sub" style="margin: -0.35rem 0 0.9rem">
+          Derives everything locally, then POSTs only
+          <code>{ username, salt, login_key, wrapped_vault_key }</code>. The password never
+          leaves this page.
+        </p>
+        <div class="row">
+          <span class="label">username</span>
+          <input type="text" id="s-username" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="row">
+          <span class="label">password</span>
+          <input type="password" id="s-password" autocomplete="new-password" />
+        </div>
+        <div class="row">
+          <span class="label">confirm password</span>
+          <input type="password" id="s-confirm" autocomplete="new-password" />
+        </div>
+        <div class="row">
+          <span class="label">sent to server</span>
+          <span class="mono-val" id="s-payload">—</span>
+        </div>
+        <div class="row" style="border-top: 1px solid var(--border); padding-top: 0.85rem">
+          <button id="s-submit">POST /signup</button>
+          <span class="pill" id="s-status" data-state="">—</span>
+        </div>
+        <div class="row"><pre id="s-raw" style="width: 100%">no request yet</pre></div>
+      </section>
     </main>
 
     <script>
@@ -365,6 +395,92 @@
       el('derive').addEventListener('click', derive);
       el('new-salt').addEventListener('click', newSalt);
       newSalt();
+    </script>
+
+    <script type="module">
+      // Phase 2.1 — signup. This is the whole client half of the zero-knowledge
+      // claim in about forty lines: derive locally, send four values, none of
+      // which the server can turn back into the password or the vault_key.
+      import {
+        generateSalt,
+        generateVaultKey,
+        deriveAccountKeys,
+        wrapVaultKey,
+        toBase64Url,
+      } from './lib/crypto/index.js';
+
+      const el = (id) => document.getElementById(id);
+
+      function set(id, value, state) {
+        const node = el(id);
+        node.textContent = value;
+        if (state !== undefined) node.dataset.state = state;
+      }
+
+      async function signup() {
+        const username = el('s-username').value.trim();
+        const password = el('s-password').value;
+        const confirm = el('s-confirm').value;
+
+        if (!username || !password) {
+          set('s-status', 'missing fields', 'error');
+          return;
+        }
+        if (password !== confirm) {
+          set('s-status', 'passwords differ', 'error');
+          return;
+        }
+
+        el('s-submit').disabled = true;
+        set('s-status', 'deriving…', '');
+
+        try {
+          const salt = generateSalt();
+          const { loginKey, kek } = await deriveAccountKeys(password, salt);
+
+          // Derivation is done, so the password has no further use. Clearing the
+          // inputs is the only handle we have on it — the string itself is
+          // immutable and interned, which is a limitation of the platform, not
+          // something to paper over.
+          el('s-password').value = '';
+          el('s-confirm').value = '';
+
+          const vaultKey = generateVaultKey();
+          const wrappedVaultKey = await wrapVaultKey(vaultKey, kek);
+
+          const body = {
+            username,
+            salt: toBase64Url(salt),
+            login_key: toBase64Url(loginKey),
+            wrapped_vault_key: toBase64Url(wrappedVaultKey),
+          };
+          set('s-payload', `salt ${salt.length}B · login_key ${loginKey.length}B · wrapped ${wrappedVaultKey.length}B`);
+
+          // Nothing here logs in, so every key is dead weight the moment the
+          // request is built. They come back from the password at login.
+          loginKey.fill(0);
+          kek.fill(0);
+          vaultKey.fill(0);
+
+          set('s-status', 'posting…', '');
+          const res = await fetch('/signup', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const text = await res.text();
+          el('s-raw').textContent = `HTTP ${res.status}\n\n${text}`;
+          set('s-status', res.ok ? 'created' : `rejected (${res.status})`, res.ok ? 'ok' : 'error');
+        } catch (err) {
+          set('s-status', 'failed', 'error');
+          el('s-raw').textContent = `request failed: ${err.message}`;
+          console.error(err);
+        } finally {
+          el('s-submit').disabled = false;
+        }
+      }
+
+      el('s-submit').addEventListener('click', signup);
     </script>
   </body>
 </html>

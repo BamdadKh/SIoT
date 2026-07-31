@@ -125,6 +125,12 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   exposes, so the tests run the exact ESM modules the client loads — no jsdom, no mocks, no
   transpile. Same reason the browser gets an import map for `hash-wasm` instead of a bundle:
   one copy of the code, tested and shipped.
+- **Fastify's Ajv runs with `removeAdditional: false`.** Its default silently strips
+  properties an `additionalProperties: false` schema doesn't name, which would turn a client
+  that accidentally posts `kek` into a 201. Unknown fields are a 400.
+- **`@node-rs/argon2` for the server-side hash of `login_key`**, at m=19 MiB/t=2/p=1 — lighter
+  than the client's m=64 MiB on purpose (see `src/lib/login-key.ts` for why that isn't a
+  weakening). Never import it into anything that touches `kek`.
 - **HSTS is set in production only.** The header is host-scoped and ignores the port, so
   emitting it on `localhost` would force HTTPS on every other project served from localhost
   on this machine, for a year, with no convenient undo.
@@ -141,16 +147,21 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
 
 ## Current state
 
-**Phases 0 and 1 complete.** Server boots over HTTPS, connects to Postgres and Redis, health
-check reports both and 503s when either is down, schema is migrated. The full client key
-hierarchy of Section 2.1 exists in `frontend/lib/crypto/` — Argon2id → master_key → HKDF →
-`login_key`/`kek`, plus `vault_key` generation and AES-256-GCM wrapping — with 28 passing
-unit tests and a panel in the test console that runs the same modules in a real browser.
+**Phases 0 and 1 complete; Phase 2 in progress (2.1–2.2 done).** Server boots over HTTPS,
+connects to Postgres and Redis, health check reports both and 503s when either is down, schema
+is migrated. The full client key hierarchy of Section 2.1 exists in `frontend/lib/crypto/` —
+Argon2id → master_key → HKDF → `login_key`/`kek`, plus `vault_key` generation and AES-256-GCM
+wrapping — with 28 passing unit tests and a panel in the test console that runs the same
+modules in a real browser.
 
-Nothing is authenticated yet: no routes touch any of this crypto, and the server still has
-only `/health`. `firmware/esp32/esp32.ino` is the old unencrypted spike and **no longer works
-against this server** — its `POST /button` endpoint is gone and the server is HTTPS-only.
-That is intended; it gets replaced wholesale by the SIOT library in Phase 5.
+`POST /signup` works end-to-end: the test console derives everything locally and posts only
+`{ username, salt, login_key, wrapped_vault_key }`; the server Argon2id-hashes `login_key` and
+writes the row. There are still **no sessions** — nothing is authenticated, and `/health` and
+`/signup` are the only routes.
 
-Next up is roadmap Phase 2 — signup and login, starting with `POST /signup` server-side
-(Argon2id over `login_key`, `@node-rs/argon2` or similar needed in `backend/`).
+`firmware/esp32/esp32.ino` is the old unencrypted spike and **no longer works against this
+server** — its `POST /button` endpoint is gone and the server is HTTPS-only. That is intended;
+it gets replaced wholesale by the SIOT library in Phase 5.
+
+Next up is roadmap 2.3 — `GET /salt` with the HMAC decoy for unknown usernames — then login
+and sessions (2.4–2.6).
