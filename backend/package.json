@@ -1,7 +1,7 @@
 {
-  "name": "backend",
-  "version": "1.0.0",
-  "description": "iot dashboard backend",
+  "name": "siot-backend",
+  "version": "0.1.0",
+  "description": "SIOT zero-knowledge IoT platform — backend API",
   "license": "ISC",
   "author": "",
   "type": "commonjs",
@@ -10,13 +10,26 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "migrate": "node-pg-migrate -j js -m migrations --envPath .env",
+    "migrate:up": "npm run migrate -- up",
+    "migrate:down": "npm run migrate -- down"
   },
   "dependencies": {
-    "fastify": "^5.2.1"
+    "@fastify/static": "^10.1.2",
+    "@fastify/type-provider-typebox": "^6.1.0",
+    "@sinclair/typebox": "^0.34.52",
+    "dotenv": "^17.4.2",
+    "fastify": "^5.2.1",
+    "fastify-plugin": "^5.1.0",
+    "ioredis": "^6.0.0",
+    "pg": "^8.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/pg": "^8.20.1",
+    "node-pg-migrate": "^9.0.0",
+    "pino-pretty": "^13.1.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

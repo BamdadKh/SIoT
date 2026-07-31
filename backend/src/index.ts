@@ -1,21 +1,26 @@
-import Fastify from 'fastify';
+import { buildApp } from './app.js';
+import { config } from './config.js';
 
-const app = Fastify();
-const port = 3030;
+async function main() {
+  const app = await buildApp();
 
-let numPressed = 0;
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      app.log.info(`${signal} received, shutting down`);
+      app.close().then(
+        () => process.exit(0),
+        (err) => {
+          app.log.error(err, 'error during shutdown');
+          process.exit(1);
+        },
+      );
+    });
+  }
 
-app.post('/button', async (_req, reply) => {
-    numPressed++;
-    console.log(`button pressed ${numPressed} time${numPressed>1 ? 's' : ''}`);
-    reply.code(200).send();
-});
+  await app.listen({ port: config.port, host: config.host });
+}
 
-app.listen({ port, host: '0.0.0.0' }, (err) => {
-    if (err) {
-        console.error('server failed to start:', err);
-        process.exitCode = 1;
-        return;
-    }
-    console.log(`server is listening on port ${port}`);
+main().catch((err) => {
+  console.error('server failed to start:', err);
+  process.exit(1);
 });
