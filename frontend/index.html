@@ -260,6 +260,37 @@
         </div>
         <div class="row"><pre id="s-raw" style="width: 100%">no request yet</pre></div>
       </section>
+
+      <section>
+        <h2>Salt lookup (Phase 2.3)</h2>
+        <p class="sub" style="margin: -0.35rem 0 0.9rem">
+          Look up any username — real or invented. Both answer with a 16-byte salt, and the
+          same name always gets the same one back. Nothing in the response says which is
+          which; that is the whole point.
+        </p>
+        <div class="row">
+          <span class="label">username</span>
+          <input type="text" id="k-username" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="row">
+          <span class="label">salt</span>
+          <span class="mono-val" id="k-salt">—</span>
+        </div>
+        <div class="row">
+          <span class="label">
+            stable across retries<br /><small>fetches twice, compares</small>
+          </span>
+          <span class="pill" id="k-stable" data-state="">—</span>
+        </div>
+        <div class="row">
+          <span class="label">round trip</span>
+          <span class="pill" id="k-timing">—</span>
+        </div>
+        <div class="row" style="border-top: 1px solid var(--border); padding-top: 0.85rem">
+          <button id="k-lookup">GET /salt</button>
+          <span class="label" style="font-size: 0.85rem" id="k-note"></span>
+        </div>
+      </section>
     </main>
 
     <script>
@@ -481,6 +512,57 @@
       }
 
       el('s-submit').addEventListener('click', signup);
+    </script>
+
+    <script type="module">
+      // Phase 2.3 — salt lookup. No crypto here; the interesting property is
+      // negative: try a username that exists and one that doesn't, and nothing
+      // in either response tells you which was which.
+      const el = (id) => document.getElementById(id);
+
+      function set(id, value, state) {
+        const node = el(id);
+        node.textContent = value;
+        if (state !== undefined) node.dataset.state = state;
+      }
+
+      async function fetchSalt(username) {
+        const res = await fetch(`/salt?username=${encodeURIComponent(username)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+        return (await res.json()).salt;
+      }
+
+      async function lookup() {
+        const username = el('k-username').value.trim();
+        if (!username) {
+          set('k-note', 'enter a username first');
+          return;
+        }
+
+        el('k-lookup').disabled = true;
+        set('k-note', '');
+
+        try {
+          const started = performance.now();
+          const first = await fetchSalt(username);
+          const elapsed = Math.round(performance.now() - started);
+          const second = await fetchSalt(username);
+
+          set('k-salt', first);
+          set('k-stable', first === second ? 'ok' : 'CHANGED', first === second ? 'ok' : 'error');
+          set('k-timing', `~${elapsed}ms`);
+          set('k-note', 'real or decoy — unknowable from here');
+        } catch (err) {
+          set('k-salt', '—');
+          set('k-stable', '—', '');
+          set('k-timing', '—');
+          set('k-note', `failed: ${err.message}`);
+        } finally {
+          el('k-lookup').disabled = false;
+        }
+      }
+
+      el('k-lookup').addEventListener('click', lookup);
     </script>
   </body>
 </html>

@@ -96,10 +96,17 @@ Granular, ordered task list derived from `SIOT_Design_Document.md`. Check items 
 - [x] Return success (no session yet — require explicit login) — 201 `{ username }`, echoing the normalised form. Duplicate → 409, which does leak that the name exists; unavoidable for any signup form that refuses duplicates, and 2.3 is where the enumeration defence actually lives
 
 ### 2.3 Salt lookup with anti-enumeration
-- [ ] Route `GET /salt?username=` on server
-- [ ] Real user → return stored salt
-- [ ] Unknown user → return `HMAC(server_secret, username)` truncated/formatted to look like a real salt
+- [x] Route `GET /salt?username=` on server — `cache-control: no-store`, since a cached decoy that later disagrees with a real salt leaks the moment the account is created
+- [x] Real user → return stored salt
+- [x] Unknown user → return `HMAC(server_secret, username)` truncated/formatted to look like a real salt — new required `SERVER_SECRET` env var (base64url, ≥32B, boot fails if short). Both branches run the same lookup *and* the same HMAC in the same order; the decoy is computed even when discarded, so no branch depends on existence
 - [ ] Test: response shape/timing is indistinguishable for real vs. fake usernames (at least structurally)
+
+> Verified by hand, not by an automated test, and the checkbox stays open until it is one.
+> A throwaway probe over 200 interleaved requests found no difference: identical status,
+> body keys, `content-length` (33), `cache-control`, and 16-byte salt, with p50 0.92 ms for
+> both real and unknown names. Automating it needs a backend test harness that boots the app
+> against a live Postgres — `backend/` has no test setup at all yet, and picking one is a
+> decision for its own step rather than something to smuggle in here.
 
 ### 2.4 Login — client
 - [ ] Login form UI

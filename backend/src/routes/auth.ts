@@ -8,7 +8,8 @@
 
 import { Type } from '@sinclair/typebox';
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox';
-import { Base64UrlBytes, decodeBase64Url } from '../lib/base64url.js';
+import { Base64UrlBytes, decodeBase64Url, encodeBase64Url } from '../lib/base64url.js';
+import { decoySalt } from '../lib/decoy-salt.js';
 import { httpError, isUniqueViolation } from '../lib/http-error.js';
 import { hashLoginKey } from '../lib/login-key.js';
 
@@ -41,6 +42,12 @@ const SignupBody = Type.Object(
 
 const SignupResponse = Type.Object({
   username: Type.String(),
+});
+
+const SaltQuery = Type.Object({ username: Username }, { additionalProperties: false });
+
+const SaltResponse = Type.Object({
+  salt: Base64UrlBytes(SALT_BYTES, 'client Argon2id salt'),
 });
 
 export const authRoutes: FastifyPluginAsyncTypebox = async (app) => {
@@ -89,6 +96,37 @@ export const authRoutes: FastifyPluginAsyncTypebox = async (app) => {
       // No session. Signup proves you can derive the keys; logging in proves it
       // again through the rate-limited path, and keeps one way in instead of two.
       return reply.code(201).send({ username });
+    },
+  );
+
+  /**
+   * The client needs the Argon2id salt before it can derive anything, which
+   * means handing it out to an unauthenticated caller. The endpoint therefore
+   * has exactly one job beyond the lookup: never reveal whether the account is
+   * real (design Section 3).
+   */
+  app.get(
+    '/salt',
+    { schema: { querystring: SaltQuery, response: { 200: SaltResponse } } },
+    async (req, reply) => {
+      const username = req.query.username.toLowerCase();
+
+      // Both branches do the same work in the same order — one indexed lookup
+      // and one HMAC — so the response time carries no signal either. The decoy
+      // is computed even when it is thrown away; it costs microseconds against a
+      // database round trip, and code with no existence-dependent branch cannot
+      // drift into having one.
+      const row = await app.pg.queryOne<{ salt: Buffer }>(
+        'select salt from users where username = $1',
+        [username],
+      );
+      const decoy = decoySalt(username, SALT_BYTES);
+
+      // no-store: a cached decoy that later disagrees with a real salt would
+      // leak the moment the account gets created.
+      return reply
+        .header('cache-control', 'no-store')
+        .send({ salt: encodeBase64Url(row?.salt ?? decoy) });
     },
   );
 };

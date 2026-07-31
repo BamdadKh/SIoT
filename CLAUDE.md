@@ -156,12 +156,17 @@ modules in a real browser.
 
 `POST /signup` works end-to-end: the test console derives everything locally and posts only
 `{ username, salt, login_key, wrapped_vault_key }`; the server Argon2id-hashes `login_key` and
-writes the row. There are still **no sessions** — nothing is authenticated, and `/health` and
-`/signup` are the only routes.
+writes the row. `GET /salt` returns the stored salt for real accounts and an HMAC decoy for
+unknown ones, structurally and timing-wise identical. There are still **no sessions** —
+nothing is authenticated, and `/health`, `/signup`, `/salt` are the only routes.
+
+`backend/` has no test harness. Everything so far was verified by hand against a running
+server; the frontend's `node --test` suite covers `lib/crypto/` only. Phase 2.5 onwards is
+where that stops being tenable.
 
 `firmware/esp32/esp32.ino` is the old unencrypted spike and **no longer works against this
 server** — its `POST /button` endpoint is gone and the server is HTTPS-only. That is intended;
 it gets replaced wholesale by the SIOT library in Phase 5.
 
-Next up is roadmap 2.3 — `GET /salt` with the HMAC decoy for unknown usernames — then login
-and sessions (2.4–2.6).
+Next up is roadmap 2.4–2.5 — login, which needs a Redis-backed rate limiter and session store
+before it can land safely.
