@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SIOT — Test Console</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0e1116;
+        --panel: #161b22;
+        --border: #2a313c;
+        --text: #d7dee8;
+        --muted: #8b95a5;
+        --ok: #3fb950;
+        --bad: #f85149;
+        --accent: #58a6ff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 2rem 1.25rem;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+      main {
+        max-width: 680px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 1.15rem;
+        letter-spacing: 0.04em;
+        margin: 0 0 0.25rem;
+      }
+      .sub {
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin: 0 0 1.75rem;
+      }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.15rem;
+        margin-bottom: 1rem;
+      }
+      h2 {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+        margin: 0 0 0.85rem;
+      }
+      button {
+        font: inherit;
+        background: #21262d;
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 0.45rem 0.9rem;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.35rem 0;
+      }
+      .row + .row {
+        border-top: 1px solid var(--border);
+      }
+      .label {
+        color: var(--muted);
+      }
+      .pill {
+        font-size: 0.8rem;
+        padding: 0.15rem 0.6rem;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+      }
+      .pill[data-state='up'],
+      .pill[data-state='ok'] {
+        color: var(--ok);
+        border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+      }
+      .pill[data-state='down'],
+      .pill[data-state='degraded'],
+      .pill[data-state='error'] {
+        color: var(--bad);
+        border-color: color-mix(in srgb, var(--bad) 45%, transparent);
+      }
+      pre {
+        background: #0b0f14;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 0.85rem;
+        margin: 0;
+        overflow-x: auto;
+        font-size: 0.85rem;
+        color: var(--muted);
+        max-height: 320px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>SIOT — Test Console</h1>
+      <p class="sub">
+        Throwaway harness for poking the backend by hand. The real client is a React app,
+        built later; nothing here is meant to survive.
+      </p>
+
+      <section>
+        <h2>Health</h2>
+        <div class="row">
+          <span class="label">status</span>
+          <span class="pill" id="status" data-state="">—</span>
+        </div>
+        <div class="row">
+          <span class="label">postgres</span>
+          <span class="pill" id="postgres" data-state="">—</span>
+        </div>
+        <div class="row">
+          <span class="label">redis</span>
+          <span class="pill" id="redis" data-state="">—</span>
+        </div>
+        <div class="row">
+          <span class="label">uptime</span>
+          <span class="pill" id="uptime">—</span>
+        </div>
+        <div class="row" style="border-top: 1px solid var(--border); padding-top: 0.85rem">
+          <button id="refresh">GET /health</button>
+          <label class="label" style="font-size: 0.85rem">
+            <input type="checkbox" id="auto" checked /> auto-refresh 5s
+          </label>
+        </div>
+      </section>
+
+      <section>
+        <h2>Raw response</h2>
+        <pre id="raw">no request yet</pre>
+      </section>
+    </main>
+
+    <script>
+      // Served from the backend origin in dev, so a relative path is all we need.
+      const API = '';
+
+      const el = (id) => document.getElementById(id);
+
+      function set(id, value, state) {
+        const node = el(id);
+        node.textContent = value;
+        if (state !== undefined) node.dataset.state = state;
+      }
+
+      async function checkHealth() {
+        try {
+          const res = await fetch(`${API}/health`, { headers: { accept: 'application/json' } });
+          const body = await res.json();
+
+          set('status', body.status, body.status);
+          set('postgres', body.dependencies.postgres, body.dependencies.postgres);
+          set('redis', body.dependencies.redis, body.dependencies.redis);
+          set('uptime', `${body.uptimeSeconds}s`);
+          el('raw').textContent = `HTTP ${res.status}\n\n${JSON.stringify(body, null, 2)}`;
+        } catch (err) {
+          set('status', 'unreachable', 'error');
+          set('postgres', '—', '');
+          set('redis', '—', '');
+          set('uptime', '—');
+          el('raw').textContent = `request failed: ${err.message}\n\nIs the backend running? (npm run dev)`;
+        }
+      }
+
+      let timer = null;
+      function applyAuto() {
+        clearInterval(timer);
+        if (el('auto').checked) timer = setInterval(checkHealth, 5000);
+      }
+
+      el('refresh').addEventListener('click', checkHealth);
+      el('auto').addEventListener('change', applyAuto);
+
+      checkHealth();
+      applyAuto();
+    </script>
+  </body>
+</html>
