@@ -39,10 +39,11 @@ Granular, ordered task list derived from `SIOT_Design_Document.md`. Check items 
 - [x] Confirm it can hit `GET /health` on the backend
 
 ### 0.5 Local HTTPS
-- [ ] Generate self-signed cert for local dev
-- [ ] Configure Fastify to serve HTTPS locally
-- [ ] Confirm frontend dev server proxies to HTTPS backend without cert errors (or accept dev-only self-signed warning)
-- [ ] Retire the plaintext HTTP spike path once this works
+- [x] Generate self-signed cert for local dev — `npm run gen-cert`; SANs cover `localhost` and every LAN IP, so a device can reach it by address and still validate. Also prints the SPKI pin for Phase 5.6
+- [x] Configure Fastify to serve HTTPS locally — `TLS_ENABLED` defaults on; missing cert is a hard startup failure, never a silent downgrade
+- [x] Confirm frontend dev server proxies to HTTPS backend without cert errors (or accept dev-only self-signed warning) — no proxy needed, the backend serves the test console itself; browsers warn once on the self-signed cert
+- [x] Retire the plaintext HTTP spike path once this works — no HTTP listener at all, and `POST /button` is gone. The ESP32 spike sketch is now dead against this server, as intended
+- [x] HSTS header, production only (not dev — it is host-scoped and would pin all of `localhost` to HTTPS)
 
 ---
 
