@@ -18,6 +18,7 @@ async function main() {
   }
 
   await app.listen({ port: config.port, host: config.host });
+  app.log.info(`${config.tlsEnabled ? 'https' : 'http'}://localhost:${config.port}/`);
 }
 
 main().catch((err) => {

@@ -8,3 +8,6 @@ build/
 
 # Local credentials for firmware sketches — see secrets.example.h
 secrets.h
+
+# Self-signed dev TLS material — regenerate with `npm run gen-cert`
+certs/

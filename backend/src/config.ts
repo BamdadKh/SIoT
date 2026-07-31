@@ -26,6 +26,13 @@ export const config = {
   databaseUrl: required('DATABASE_URL'),
   redisUrl: required('REDIS_URL'),
   serveTestFrontend: bool('SERVE_TEST_FRONTEND', false),
+
+  // TLS is mandatory by design (Section 4) — including on the LAN. The toggle
+  // exists only so a misconfigured cert produces an obvious, loud failure
+  // instead of a silent fallback to plaintext.
+  tlsEnabled: bool('TLS_ENABLED', true),
+  tlsCertPath: optional('TLS_CERT_PATH', 'certs/dev-cert.pem'),
+  tlsKeyPath: optional('TLS_KEY_PATH', 'certs/dev-key.pem'),
 } as const;
 
 export const isDev = config.nodeEnv !== 'production';
