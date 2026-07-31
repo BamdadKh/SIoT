@@ -77,6 +77,14 @@ npm run migrate:up              # apply migrations
 npm run dev                     # https://localhost:3030
 ```
 
+Client crypto is a separate package with its own tests:
+
+```bash
+cd frontend
+npm install                     # first time only — hash-wasm
+npm test                        # node --test over lib/crypto/
+```
+
 Then open <https://localhost:3030/> for the test console, which polls `GET /health`.
 The browser will warn once about the self-signed certificate — that is expected; accept it.
 Do not "fix" it by turning TLS off.
@@ -109,6 +117,14 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   (the `selfsigned` package, not `openssl`, which isn't reliably on PATH on Windows).
   `TLS_ENABLED=false` exists as a debugging escape hatch and logs a loud warning; it is not
   a supported mode. There is no plaintext listener and no HTTP→HTTPS redirect.
+- **Client crypto lives in `frontend/lib/crypto/`, never in `backend/`.** Physical separation
+  is weaker than a cryptographic guarantee, but it means "just derive the kek server-side"
+  cannot be written without an obviously wrong import path. `frontend/` is now its own npm
+  package (still no build step) purely so it can have `hash-wasm` and a test runner.
+- **Tests are `node --test`, no framework.** Node's Web Crypto is the same API the browser
+  exposes, so the tests run the exact ESM modules the client loads — no jsdom, no mocks, no
+  transpile. Same reason the browser gets an import map for `hash-wasm` instead of a bundle:
+  one copy of the code, tested and shipped.
 - **HSTS is set in production only.** The header is host-scoped and ignores the port, so
   emitting it on `localhost` would force HTTPS on every other project served from localhost
   on this machine, for a year, with no convenient undo.
@@ -125,13 +141,16 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
 
 ## Current state
 
-**Phase 0 complete.** Server boots over HTTPS, connects to Postgres and Redis, health check
-reports both and 503s when either is down, schema is migrated, test console renders it.
+**Phases 0 and 1 complete.** Server boots over HTTPS, connects to Postgres and Redis, health
+check reports both and 503s when either is down, schema is migrated. The full client key
+hierarchy of Section 2.1 exists in `frontend/lib/crypto/` — Argon2id → master_key → HKDF →
+`login_key`/`kek`, plus `vault_key` generation and AES-256-GCM wrapping — with 28 passing
+unit tests and a panel in the test console that runs the same modules in a real browser.
 
-Nothing is authenticated yet and there is no crypto yet. `firmware/esp32/esp32.ino` is the
-old unencrypted spike and **no longer works against this server** — its `POST /button`
-endpoint is gone and the server is HTTPS-only. That is intended; it gets replaced wholesale
-by the SIOT library in Phase 5.
+Nothing is authenticated yet: no routes touch any of this crypto, and the server still has
+only `/health`. `firmware/esp32/esp32.ino` is the old unencrypted spike and **no longer works
+against this server** — its `POST /button` endpoint is gone and the server is HTTPS-only.
+That is intended; it gets replaced wholesale by the SIOT library in Phase 5.
 
-Next up is roadmap Phase 1 — client-side crypto primitives (Argon2id, HKDF, key wrapping),
-which needs a test runner set up first since Phase 1 is entirely unit-tested.
+Next up is roadmap Phase 2 — signup and login, starting with `POST /signup` server-side
+(Argon2id over `login_key`, `@node-rs/argon2` or similar needed in `backend/`).

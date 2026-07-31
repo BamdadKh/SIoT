@@ -4,6 +4,21 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SIOT — Test Console</title>
+
+    <!--
+      Dev-only shim so `lib/crypto/` can use the bare specifier `hash-wasm` in
+      both Node (tests) and the browser — the modules stay byte-identical in the
+      two environments, which is the point. The backend serves this whole
+      directory in dev, node_modules included. When the Vite client lands, the
+      bundler resolves the specifier and this map goes away.
+    -->
+    <script type="importmap">
+      {
+        "imports": {
+          "hash-wasm": "/node_modules/hash-wasm/dist/index.esm.min.js"
+        }
+      }
+    </script>
     <style>
       :root {
         color-scheme: dark;
@@ -98,6 +113,23 @@
         color: var(--bad);
         border-color: color-mix(in srgb, var(--bad) 45%, transparent);
       }
+      input[type='text'],
+      input[type='password'] {
+        font: inherit;
+        background: #0b0f14;
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 0.45rem 0.65rem;
+        min-width: 15rem;
+      }
+      .mono-val {
+        color: var(--accent);
+        font-size: 0.8rem;
+        overflow-wrap: anywhere;
+        text-align: right;
+        max-width: 60%;
+      }
       pre {
         background: #0b0f14;
         border: 1px solid var(--border);
@@ -149,6 +181,55 @@
         <h2>Raw response</h2>
         <pre id="raw">no request yet</pre>
       </section>
+
+      <section>
+        <h2>Client crypto (Phase 1)</h2>
+        <p class="sub" style="margin: -0.35rem 0 0.9rem">
+          Runs <code>lib/crypto/</code> in the browser — the same modules
+          <code>npm test</code> covers. Nothing here is sent anywhere.
+        </p>
+        <div class="row">
+          <span class="label">password</span>
+          <input type="password" id="password" value="correct horse battery staple" />
+        </div>
+        <div class="row">
+          <span class="label">
+            salt (128-bit)
+            <button id="new-salt" style="padding: 0.1rem 0.5rem; font-size: 0.8rem">new</button>
+          </span>
+          <input type="text" id="salt" spellcheck="false" style="min-width: 19rem" />
+        </div>
+        <div class="row">
+          <span class="label">login_key → server<br /><small>same inputs → same value</small></span>
+          <span class="mono-val" id="c-login">—</span>
+        </div>
+        <div class="row">
+          <span class="label">kek (stays local)<br /><small>same inputs → same value</small></span>
+          <span class="mono-val" id="c-kek">—</span>
+        </div>
+        <div class="row">
+          <span class="label">
+            wrapped_vault_key<br /><small>changes every click: fresh vault_key + IV</small>
+          </span>
+          <span class="mono-val" id="c-wrapped">—</span>
+        </div>
+        <div class="row">
+          <span class="label">unwrap round-trip</span>
+          <span class="pill" id="c-roundtrip" data-state="">—</span>
+        </div>
+        <div class="row">
+          <span class="label">wrong-password unwrap</span>
+          <span class="pill" id="c-wrongpw" data-state="">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Argon2id (64 MiB, t=3)</span>
+          <span class="pill" id="c-timing">—</span>
+        </div>
+        <div class="row" style="border-top: 1px solid var(--border); padding-top: 0.85rem">
+          <button id="derive">derive keys</button>
+          <span class="label" style="font-size: 0.85rem" id="c-note"></span>
+        </div>
+      </section>
     </main>
 
     <script>
@@ -193,6 +274,97 @@
 
       checkHealth();
       applyAuto();
+    </script>
+
+    <script type="module">
+      // Phase 1 smoke test. Deliberately exercises the real modules rather than
+      // reimplementing anything: if this panel works, the browser runs exactly
+      // what `npm test` verified.
+      import {
+        generateSalt,
+        generateVaultKey,
+        deriveAccountKeys,
+        wrapVaultKey,
+        unwrapVaultKey,
+        toBase64Url,
+        fromBase64Url,
+        bytesEqual,
+        SALT_BYTES,
+      } from './lib/crypto/index.js';
+
+      const el = (id) => document.getElementById(id);
+      const short = (bytes) => `${toBase64Url(bytes).slice(0, 22)}…`;
+
+      function set(id, value, state) {
+        const node = el(id);
+        node.textContent = value;
+        if (state !== undefined) node.dataset.state = state;
+      }
+
+      // The salt is sticky and editable rather than regenerated per click: with a
+      // fresh salt every time, login_key and kek change on every derive and the
+      // determinism the whole scheme rests on is impossible to eyeball.
+      function newSalt() {
+        el('salt').value = toBase64Url(generateSalt());
+      }
+
+      function readSalt() {
+        const salt = fromBase64Url(el('salt').value.trim());
+        if (salt.length !== SALT_BYTES) {
+          throw new Error(`salt must be ${SALT_BYTES} bytes, got ${salt.length}`);
+        }
+        return salt;
+      }
+
+      async function derive() {
+        const password = el('password').value;
+        if (!password) {
+          set('c-note', 'enter a password first');
+          return;
+        }
+
+        el('derive').disabled = true;
+        set('c-note', 'deriving…');
+
+        try {
+          const salt = readSalt();
+          const started = performance.now();
+          const { loginKey, kek } = await deriveAccountKeys(password, salt);
+          const elapsed = Math.round(performance.now() - started);
+
+          const vaultKey = generateVaultKey();
+          const wrapped = await wrapVaultKey(vaultKey, kek);
+          const recovered = await unwrapVaultKey(wrapped, kek);
+
+          // Same salt, different password: proves the blob is useless without the
+          // exact password, which is the entire zero-knowledge claim.
+          const { kek: wrongKek } = await deriveAccountKeys(`${password}!`, salt);
+          let rejected = false;
+          try {
+            await unwrapVaultKey(wrapped, wrongKek);
+          } catch {
+            rejected = true;
+          }
+
+          set('c-login', short(loginKey));
+          set('c-kek', short(kek));
+          set('c-wrapped', `${short(wrapped)} (${wrapped.length}B)`);
+          const roundTripped = bytesEqual(recovered, vaultKey);
+          set('c-roundtrip', roundTripped ? 'ok' : 'MISMATCH', roundTripped ? 'ok' : 'error');
+          set('c-wrongpw', rejected ? 'rejected' : 'ACCEPTED', rejected ? 'ok' : 'error');
+          set('c-timing', `~${elapsed}ms`);
+          set('c-note', 'keys held in memory only, never stored');
+        } catch (err) {
+          set('c-note', `failed: ${err.message}`);
+          console.error(err);
+        } finally {
+          el('derive').disabled = false;
+        }
+      }
+
+      el('derive').addEventListener('click', derive);
+      el('new-salt').addEventListener('click', newSalt);
+      newSalt();
     </script>
   </body>
 </html>

@@ -1,0 +1,14 @@
+{
+  "name": "siot-frontend",
+  "version": "0.1.0",
+  "description": "SIOT client — crypto primitives and (for now) a plain-HTML test console",
+  "license": "ISC",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "hash-wasm": "^4.12.0"
+  }
+}

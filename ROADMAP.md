@@ -49,26 +49,34 @@ Granular, ordered task list derived from `SIOT_Design_Document.md`. Check items 
 
 ## Phase 1 — Client-Side Crypto Primitives
 
+> Lives in `frontend/lib/crypto/` as plain ESM — deliberately *not* in `backend/`, so the
+> server cannot import the code that produces `kek`/`vault_key` even by accident. Tested with
+> `node --test` from `frontend/` (`npm test`); Node's Web Crypto is the same API the browser
+> exposes, so the tests exercise the exact modules the client loads. An import map in
+> `index.html` resolves the bare `hash-wasm` specifier in the browser until Vite lands.
+
 ### 1.1 Argon2id in the browser
-- [ ] Pick a vetted Argon2id WASM library (e.g. `hash-wasm` or `argon2-browser`) — research and confirm it's actively maintained
-- [ ] Write a thin wrapper function `deriveMasterKey(password, salt) -> 32B key` with the exact params (m=64MiB, t=3, p=1)
-- [ ] Unit test: same password+salt always produces same output; different salt produces different output
+- [x] Pick a vetted Argon2id WASM library (e.g. `hash-wasm` or `argon2-browser`) — **`hash-wasm` 4.12.0**: MIT, reference Argon2 C compiled to WASM, WASM inlined as base64 (no second fetch, no build step), same package works in Node and browser. `argon2-browser` rejected — last release 2022
+- [x] Write a thin wrapper function `deriveMasterKey(password, salt) -> 32B key` with the exact params (m=64MiB, t=3, p=1) — `lib/crypto/argon2.js`; params frozen in `ARGON2_PARAMS` and treated as a wire format, since changing one locks every existing user out
+- [x] Unit test: same password+salt always produces same output; different salt produces different output — plus a pinned known-answer vector, so a silent param/library drift fails the suite
 
 ### 1.2 HKDF derivation
-- [ ] Implement `hkdfSha256(masterKey, info) -> 32B` using Web Crypto's `HKDF` support
-- [ ] Derive `login_key` with info=`"siot/auth/v1"`
-- [ ] Derive `kek` with info=`"siot/kek/v1"`
-- [ ] Unit test: `login_key` and `kek` are different even though derived from the same `master_key`
+- [x] Implement `hkdfSha256(masterKey, info) -> 32B` using Web Crypto's `HKDF` support — empty HKDF salt, which RFC 5869 allows when the IKM is already uniform (it is: Argon2id output). The per-user randomness lives in the Argon2id salt one step up
+- [x] Derive `login_key` with info=`"siot/auth/v1"`
+- [x] Derive `kek` with info=`"siot/kek/v1"`
+- [x] Unit test: `login_key` and `kek` are different even though derived from the same `master_key`
+- [x] Added `deriveAccountKeys(password, salt)` — the whole path in one call, zeroing the master_key after use so no caller has to hold it
 
 ### 1.3 vault_key wrapping
-- [ ] Generate random `vault_key` (32B CSPRNG) at signup time only
-- [ ] Implement AES-256-GCM wrap/unwrap functions (`wrapKey(vault_key, kek)`, `unwrapKey(wrapped, kek)`)
-- [ ] Unit test: wrap then unwrap round-trips correctly
-- [ ] Unit test: unwrap fails loudly with wrong `kek`
+- [x] Generate random `vault_key` (32B CSPRNG) at signup time only
+- [x] Implement AES-256-GCM wrap/unwrap functions (`wrapKey(vault_key, kek)`, `unwrapKey(wrapped, kek)`) — named `wrapVaultKey`/`unwrapVaultKey`; blob is `iv(12) || ct(32) || tag(16)` = 60B, AAD `"siot/vault-key-wrap/v1"` (not bound to username, which must stay changeable). Random IV is safe here and only here — a `kek` wraps a handful of times ever, unlike a device emitting records forever (Section 7.2)
+- [x] Unit test: wrap then unwrap round-trips correctly
+- [x] Unit test: unwrap fails loudly with wrong `kek` — also on a tampered blob and on a same-`kek` blob carrying a foreign AAD
 
 ### 1.4 Salt & CSPRNG helpers
-- [ ] Helper to generate 128-bit CSPRNG salt at signup
-- [ ] Confirm `crypto.getRandomValues` used everywhere random bytes are needed (never `Math.random`)
+- [x] Helper to generate 128-bit CSPRNG salt at signup — `generateSalt()`; `lib/crypto/random.js` throws at import time if `getRandomValues` is missing rather than degrading
+- [x] Confirm `crypto.getRandomValues` used everywhere random bytes are needed (never `Math.random`) — enforced by a test that greps `lib/` for `Math.random`, not just by review
+- [x] `toBase64Url`/`fromBase64Url` in `lib/crypto/encoding.js` — needed before Phase 2 can put any of this on the wire
 
 ---
 
