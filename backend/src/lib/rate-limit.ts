@@ -74,6 +74,19 @@ export const addressThrottle = (address: string): Throttle => ({
   policy: ADDRESS_POLICY,
 });
 
+/**
+ * Same shape as `accountThrottle`, but its own bucket: guessing the *current*
+ * password via `POST /change-password` already requires a live session, a much
+ * higher bar than `/login`'s "know a username". That is a real difference in
+ * attack cost, so it gets its own counter rather than spending the login
+ * budget. Sharing one would let a session-cookie thief's guesses lock out the
+ * legitimate user's login, or vice versa.
+ */
+export const changePasswordThrottle = (userId: string): Throttle => ({
+  key: `pwchange:acct:${userId}`,
+  policy: ACCOUNT_POLICY,
+});
+
 const lockKey = (key: string) => `${key}:until`;
 
 /** Doubling from the first attempt past the free allowance, then flat at the cap. */

@@ -245,6 +245,11 @@ a:hover {
 
 .button:hover:not(:disabled) {
   background: var(--olive-strong);
+  /* `.button` is sometimes an `<a>` (Link), and the generic `a:hover` rule
+     below would otherwise win on colour/underline and make a link-flavoured
+     button hover differently from a real <button> next to it. */
+  color: var(--on-olive);
+  text-decoration: none;
 }
 
 .button:disabled {
@@ -267,6 +272,10 @@ a:hover {
 .button-quiet:hover:not(:disabled) {
   background: var(--surface);
   border-color: var(--line-strong);
+  /* Same reasoning as `.button:hover` above: this class dresses an <a> as
+     often as a <button>, and both must hover identically. */
+  color: var(--ink);
+  text-decoration: none;
 }
 
 .button-link {
@@ -334,6 +343,20 @@ a:hover {
   border: 1px solid var(--alarm);
   background: var(--alarm-ground);
   color: var(--alarm);
+  font-size: var(--size-small);
+  line-height: 1.5;
+  padding: 10px var(--sp-3);
+}
+
+/* --- confirmation ---------------------------------------------------------- */
+
+/* Same shape and weight as .alarm, in olive instead of alarm: a completed
+   action, not a failure, but still worth more than a line of .prose that reads
+   the same as everything around it. */
+.success {
+  border: 1px solid var(--olive);
+  background: var(--olive-halo);
+  color: var(--olive-strong);
   font-size: var(--size-small);
   line-height: 1.5;
   padding: 10px var(--sp-3);

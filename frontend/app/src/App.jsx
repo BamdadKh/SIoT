@@ -6,6 +6,7 @@ import { SignIn } from './screens/SignIn.jsx';
 import { SignUp } from './screens/SignUp.jsx';
 import { Unlock } from './screens/Unlock.jsx';
 import { Devices } from './screens/Devices.jsx';
+import { ChangePassword } from './screens/ChangePassword.jsx';
 
 /**
  * Which screen to show is decided by two independent facts, not one:
@@ -77,6 +78,12 @@ export function App() {
         onSignOut={handleSignOut}
         signingOut={signingOut}
       />
+    );
+  }
+
+  if (path === '/password') {
+    return (
+      <ChangePassword username={session.username} onSignOut={handleSignOut} signingOut={signingOut} />
     );
   }
 
