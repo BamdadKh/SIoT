@@ -16,7 +16,7 @@
 
   /* --- ground ------------------------------------------------------------ */
   --paper: #efede7;
-  --grid-ink: rgba(92, 82, 64, 0.09);
+  --grid-ink: rgba(92, 82, 64, 0.07);
   --surface: #faf9f5;
   --surface-input: #ffffff;
 
@@ -80,8 +80,18 @@
   --sp-8: 44px;
 
   /* The ground's grid pitch, and the size of a registration tick. Both are
-     structural: the ticks read as survey marks only while they stay square. */
-  --grid-step: 34px;
+     structural: the ticks read as survey marks only while they stay square.
+
+     The pitch is 68px and the ink is deliberately faint. A 1px hairline cannot
+     land on a consistent device pixel when devicePixelRatio is fractional —
+     browser zoom, and most Windows display scalings — so each rule rounds to the
+     nearest whole pixel and adjacent cells come out visibly different widths. A
+     tighter or darker grid makes that unmistakable; at this pitch and alpha the
+     rounding stays below the threshold where anyone can see it. Verified at
+     dpr 0.78, which is where it first showed up. Any repeating hairline added
+     later (chart gridlines, a device grid) has the same problem and needs the
+     same treatment — the fix is fewer, fainter rules, not a tighter grid. */
+  --grid-step: 68px;
   --tick: 13px;
 
   --control-height: 42px;
