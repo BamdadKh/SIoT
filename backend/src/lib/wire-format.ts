@@ -32,3 +32,9 @@ export const WRAPPED_VAULT_KEY_BYTES = 60;
  */
 export const VAULT_BLOB_MIN_BYTES = 12 + 16 + 1;
 export const VAULT_BLOB_MAX_BYTES = 256 * 1024;
+
+/** 128-bit random, generated in the browser at provisioning time (design 5.1). */
+export const DEVICE_ID_BYTES = 16;
+
+/** Ed25519 public key, `frontend/lib/crypto/` device key derivation (design 5.1). */
+export const SIGN_PUB_BYTES = 32;

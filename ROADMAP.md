@@ -216,9 +216,16 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 - [ ] Unit test: deterministic derivation from same `DEVICE_SECRET` reproduces same keys
 
 ### 4.2 Device registration — server
-- [ ] Table already has `devices` (from 0.3) — confirm columns match: device_id, sign_pub, owner_user_id
-- [ ] Route `POST /devices/register` (authenticated): `{ device_id, sign_pub }`, enforce `device_id` uniqueness
-- [ ] Reject if `device_id` already exists
+- [x] Table already has `devices` (from 0.3) — confirm columns match: device_id, sign_pub, owner_user_id
+- [x] Route `POST /devices/register` (authenticated): `{ device_id, sign_pub }`, enforce `device_id` uniqueness — `src/routes/devices.ts`. Uniqueness comes from `device_id` being the primary key, not a pre-`SELECT`, same reasoning as the `/signup` username race
+- [x] Reject if `device_id` already exists — 409, and it is a *global* uniqueness check (device_id is the PK across all owners), not per-owner; verified by hand that a second account attempting to register the first account's `device_id` also gets 409
+
+> Done out of order and backend-only: 4.1 (browser-side key derivation) and 4.3 (vault device
+> record) live in `frontend/lib/crypto/` and were deliberately skipped in this pass — the
+> session's instruction was backend work only, no frontend touches. `POST /devices/register`
+> was built and hand-verified with a throwaway script generating random `device_id`/`sign_pub`
+> bytes directly, standing in for the client derivation 4.1 will eventually produce. No
+> automated test; same gap as the rest of `backend/`.
 
 ### 4.3 Device record in the vault
 - [ ] Client: encrypt `DEVICE_SECRET` under `vault_key`, add entry to vault's device list
@@ -269,12 +276,16 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 - [ ] Publish known-answer test vectors — a port that cannot reproduce them is broken, and finding that out from a vector beats finding it out from a server rejection
 
 ### 4.8 Device list — names and liveness
-- [ ] Route `GET /devices` (authenticated): the metadata the server legitimately holds per device — `device_id`, `last_seq`, and when its newest record arrived. No names, because it has none
-- [ ] Decide how last-seen is stored: `max(created_at)` over `records`, or a `last_seen_at` column on `devices` updated alongside `last_seq` in the Phase 6 insert. The column is a migration; pick one and say why
+- [x] Route `GET /devices` (authenticated): the metadata the server legitimately holds per device — `device_id`, `last_seq`, and when its newest record arrived. No names, because it has none — `src/routes/devices.ts`, scoped to `owner_user_id = req.session.userId`
+- [x] Decide how last-seen is stored: `max(created_at)` over `records`, or a `last_seen_at` column on `devices` updated alongside `last_seq` in the Phase 6 insert. **Chosen: the column** (migration `1785626993678_devices-last-seen.js`) — `records` has no per-device covering index that makes `max()` cheap once a device has years of history, and `last_seq` already lives on `devices` for the identical reason. Nothing writes it yet; that lands with the Phase 6 insert, so every device currently reads back `last_seen_at: null`, which is correct until then
 - [ ] Client: join the server's list against the vault's device records by `DEVICE_ID`, so names come from the vault and liveness from the server
 - [ ] Show **when it was last heard from**, not just a dot (design 5.6) — devices report on wildly different schedules and a fixed threshold will call a healthy hourly sensor dead
 - [ ] Never phrase "offline" as a fact about the device: the client knows it has not received a record, not why. A withholding server is indistinguishable from a flat battery
 - [ ] Handle the two mismatch cases visibly: a device in the vault the server does not know, and a device the server reports that the vault has no record for (an orphan — see design 5.4)
+
+> The four unticked items above are all `frontend/app/` UI and are deliberately left for a
+> session that touches the frontend (also gated by the CLAUDE.md rule that new UI is
+> Opus-only). The server side of 4.8 is complete and independently testable via `GET /devices`.
 
 ---
 

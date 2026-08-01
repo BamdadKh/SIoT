@@ -347,3 +347,21 @@ both a server endpoint and something the client needs to reload on needs two nam
 other authenticated action already has one name for the API and another for the screen.
 
 `backend/` still has no test harness; this phase adds to that gap rather than closing it.
+
+**Phase 4 has a backend-only slice done: 4.2 and the server half of 4.8.** `POST
+/devices/register` (`src/routes/devices.ts`) takes `{ device_id, sign_pub }` from an
+authenticated session and inserts into `devices`; uniqueness comes from `device_id` being the
+primary key, not a pre-`SELECT`, so a conflict is a 409 and it is checked globally across
+owners, not per-account. `GET /devices` returns `device_id`, `last_seq`, and `last_seen_at`
+(a new nullable column, migration `1785626993678_devices-last-seen.js`, chosen over
+`max(created_at)` over `records` for the same reason `last_seq` already lives on `devices`
+rather than being computed from it) scoped to the caller's own devices, `cache-control:
+no-store`. Nothing populates `last_seen_at` yet; that lands with Phase 6's `POST /records`
+insert, so every device currently reads back `null`, which is correct until then. 4.1, 4.3,
+and the rest of 4.8 (browser-side key derivation, the vault device record, and the client join
+that produces names and liveness) are `frontend/` work and were deliberately left for a
+session that touches the frontend. Verified by hand with a throwaway script generating random
+`device_id`/`sign_pub` bytes directly, standing in for 4.1's derivation: registration,
+duplicate rejection, cross-owner uniqueness, unauthenticated 401, malformed-length 400, and
+per-owner scoping on the list route all behaved as expected. No automated test; same gap as
+the rest of `backend/`.
