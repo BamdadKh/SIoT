@@ -281,6 +281,22 @@ the React screens. Phase 2.5 onwards is where that stops being tenable.
 server** — its `POST /button` endpoint is gone and the server is HTTPS-only. That is intended;
 it gets replaced wholesale by the SIoT library in Phase 5.
 
-Next up is Phase 3 — vault storage: `PUT /vault` / `GET /vault`, version-based conflict and
-rollback detection, then the password change flow. The client already holds an unwrapped
-`vault_key` after login and after unlock, so 3.1 has everything it needs on both paths.
+**Phase 3.1 and 3.2 are both done now**, server and client halves. `PUT /vault` / `GET /vault`
+close the write path and the version-based conflict guard as before, and the client-side
+rollback defence described in the design document (Section 8) is now real: `Devices.jsx` fetches
+the vault on mount, compares its version against a high-water mark cached in IndexedDB
+(`frontend/app/src/lib/vault-version-store.js`, keyed **by username** so switching accounts on
+one browser is not mistaken for a rollback of the account it replaced; the first version of
+this was keyed globally per origin, and that mistake was caught by hand-testing an account
+switch rather than by design), and refuses to trust anything the AAD/envelope checks in
+`vault.js` would have let through: a blob that is old but honestly labelled with its own old
+version. A caught rollback renders a rust-styled panel (rust, not the generic alarm colour,
+since this is "a vault the client will not open", the case tokens.css already reserves rust for)
+naming both versions and telling the person not to make vault changes until it is resolved.
+Verified by hand against a running server: wrote the vault to v2, rolled `users.vault_version`
+back to 1 directly in Postgres, reloaded, and got the warning; restored to the true v2, and the
+warning cleared on the next reload. No automated test; `backend/` still has no test harness.
+
+Next up is Phase 3.3, the password change flow: derive a new `master_key`/`kek` from the new
+password, re-wrap the existing `vault_key` (not the vault contents), and a `POST
+/change-password` route to land the new salt/hash/wrapped key together.

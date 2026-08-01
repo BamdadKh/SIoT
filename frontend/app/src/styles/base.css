@@ -339,6 +339,21 @@ a:hover {
   padding: 10px var(--sp-3);
 }
 
+/* A vault the client refuses to open uses rust, not alarm. `--alarm` is for a
+   wrong password or a network failure, something the person did or can retry.
+   This is the token reserved for "a vault that cannot currently be opened"
+   (tokens.css), because a rollback is not the person's mistake and retrying
+   does not fix it. */
+.rollback-warning {
+  border: 1px solid var(--rust);
+  background: var(--surface);
+  padding: 30px 36px;
+}
+
+.rollback-warning .h3 {
+  color: var(--rust);
+}
+
 /* --- app shell ----------------------------------------------------------- */
 
 .topbar {

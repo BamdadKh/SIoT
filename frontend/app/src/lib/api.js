@@ -95,3 +95,13 @@ export function logOutEverywhere() {
 export function fetchWrappedVaultKey() {
   return request('GET', '/vault-key');
 }
+
+/**
+ * The sealed vault document.
+ *
+ * @returns {Promise<{ vault_version: number, ciphertext: string|null }>}
+ *          `ciphertext` base64url, null for an account that has never written one.
+ */
+export function fetchVault() {
+  return request('GET', '/vault');
+}

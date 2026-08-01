@@ -180,19 +180,17 @@ Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items 
 
 ### 3.2 Vault read path
 - [x] Route `GET /vault` (authenticated): return ciphertext + version — `cache-control: no-store`, for freshness rather than confidentiality: the blob is opaque to any cache it passes through, but a *stale* one is exactly the rollback the version counter exists to make loud
-- [x] Client decrypts with in-memory `vault_key` — exercised in the test console's vault panel, which lives in the same closure as `kek`/`vault_key`
-- [ ] Client caches highest seen `vault_version` in IndexedDB
-- [ ] Client refuses/warns if server returns a version lower than cached (rollback detection)
-- [ ] Test: manually roll back a vault row in the DB, confirm client surfaces a loud warning instead of silently accepting
+- [x] Client decrypts with in-memory `vault_key` — exercised in the test console's vault panel, which lives in the same closure as `kek`/`vault_key`, and now also on `Devices` mount in the real React client
+- [x] Client caches highest seen `vault_version` in IndexedDB: `frontend/app/src/lib/vault-version-store.js`, one object store keyed **by username**, not one global number. First shipped keyed globally per origin; caught by hand-testing before this was ticked off, because a second account signed into on the same browser reported the first account's higher version as a rollback of its own, unrelated counter. Re-keyed per-account and reverified
+- [x] Client refuses/warns if server returns a version lower than cached (rollback detection): lives in `Devices.jsx` rather than a new screen, since that is the one place unlocked and vault-open overlap. It runs before the empty-devices state renders and shows a rust-styled panel (design tokens: rust is reserved for a vault the client will not open) naming both versions and telling the person not to make changes until it is resolved
+- [x] Test: manually roll back a vault row in the DB, confirm client surfaces a loud warning instead of silently accepting. Verified by hand end-to-end: signed up, wrote vault v1 then v2 through the test console (cached high-water mark advances to 2 in the real client), `update users set vault_version = 1` directly in Postgres, reloaded, and got the rust "This vault went backwards" panel citing server version 1 against cached version 2 with nothing decrypted. Restoring the true version 2 by hand cleared the warning on the next reload. No automated test; `backend/` still has no test harness (same gap 2.3 already flagged)
 
 > **A vault that has never been written is `{ vault_version: 0, ciphertext: null }`, not a 404.**
 > A 404 is a second shape the client has to branch on, and the branch that skips the
 > monotonicity check is precisely the one a hostile server would want to steer it into.
 > "No vault here" and "here is last week's vault" have to be compared on the same scale.
->
-> The last three items are the client-side half and are deliberately not done yet: they need
-> real UI (a warning someone can act on) and storage that survives a reload, which is its own
-> checkpoint rather than something to bolt onto the round-trip.
+
+Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 
 ### 3.3 Password change flow
 - [ ] Client: derive new `master_key`/`kek` from new password, re-wrap existing `vault_key` (not vault contents)
