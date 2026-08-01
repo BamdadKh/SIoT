@@ -1,6 +1,6 @@
-# SIOT — Implementation Roadmap
+# SIoT Implementation Roadmap
 
-Granular, ordered task list derived from `SIOT_Design_Document.md`. Check items off as you go. Each phase should leave you with something runnable/testable before moving to the next.
+Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items off as you go. Each phase should leave you with something runnable/testable before moving to the next.
 
 ---
 
@@ -214,7 +214,7 @@ Granular, ordered task list derived from `SIOT_Design_Document.md`. Check items 
 ## Phase 5 — ESP32 Library & Wire Protocol
 
 ### 5.1 Library skeleton
-- [ ] New Arduino/PlatformIO library project (`SIOT` lib) separate from example sketches
+- [ ] New Arduino/PlatformIO library project (`SIoT` lib) separate from example sketches
 - [ ] NVS read helpers for `DEVICE_ID` / `DEVICE_SECRET` from the dedicated partition
 - [ ] Key derivation on-device: HKDF-SHA256 (need a small C++ implementation or existing lib — mbedTLS has primitives)
 - [ ] Derive `device_data_key` and `ed25519_seed` on boot

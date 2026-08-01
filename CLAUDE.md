@@ -1,17 +1,17 @@
-# SIOT
+# SIoT
 
 Zero-knowledge IoT platform. ESP32 devices encrypt readings client-side; the server is a
 dumb, fully untrusted blob store.
 
 ## Read these first
 
-- `SIOT_Design_Document.md` — the architecture. Section numbers are referenced throughout
+- `SIoT_Design_Document.md` — the architecture. Section numbers are referenced throughout
   the code in comments; keep those references accurate if sections move.
 - `ROADMAP.md` — ordered task list. Work top-to-bottom, check items off as they land.
 
 ## How we work
 
-Deliberately slow and verifiable. Four rules:
+We work deliberately and verifiably. Four rules:
 
 1. **Follow `ROADMAP.md` in order, and stop at the first point where the work can actually
    be tested.** Not at the end of a phase — at the next checkpoint that produces something
@@ -192,7 +192,7 @@ where that stops being tenable.
 
 `firmware/esp32/esp32.ino` is the old unencrypted spike and **no longer works against this
 server** — its `POST /button` endpoint is gone and the server is HTTPS-only. That is intended;
-it gets replaced wholesale by the SIOT library in Phase 5.
+it gets replaced wholesale by the SIoT library in Phase 5.
 
 Next up is Phase 3 — vault storage: `PUT /vault` / `GET /vault`, version-based conflict and
 rollback detection, then the password change flow. The client already holds an unwrapped

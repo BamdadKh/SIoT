@@ -23,7 +23,7 @@ export function Base64UrlBytes(byteLength: number, description: string) {
   const chars = encodedLength(byteLength);
   return Type.String({
     pattern: `^[A-Za-z0-9_-]{${chars}}$`,
-    description: `${description} — ${byteLength} bytes, base64url (unpadded)`,
+    description: `${description}: ${byteLength} bytes base64url (unpadded)`,
   });
 }
 

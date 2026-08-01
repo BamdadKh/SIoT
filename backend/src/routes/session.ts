@@ -21,9 +21,9 @@ const LogoutResponse = Type.Object({
 
 export const sessionRoutes: FastifyPluginAsyncTypebox = async (app) => {
   /**
-   * "Who am I, and is this cookie still good?" — the one call a client needs on
-   * page load to decide between the dashboard and the login form. It is also
-   * what makes the session hook observable without waiting for the vault.
+   * Check current session identity and validity. This is the one call a client
+   * needs on page load to decide between the dashboard and the login form.
+   * It also makes the session hook observable without waiting for the vault.
    */
   app.get('/session', { schema: { response: { 200: SessionResponse } } }, async (req) => {
     const user = await app.pg.queryOne<{ username: string }>(
@@ -31,18 +31,18 @@ export const sessionRoutes: FastifyPluginAsyncTypebox = async (app) => {
       [req.session!.userId],
     );
 
-    // The session outlived the account it names — a deleted user, or a restored
-    // Postgres backup against a live Redis. Rare, but a 500 here would be
-    // misleading: the request is genuinely unauthenticated.
+    // The session outlived the account it names. This could be a deleted user or
+    // a Postgres backup restored against live Redis. A 500 would be misleading
+    // here because the request is genuinely unauthenticated.
     if (!user) throw httpError(401, 'authentication required');
 
     return { username: user.username };
   });
 
   /**
-   * POST, not GET: a logout reachable by <img src> is a nuisance an attacker can
-   * trigger cross-site. `SameSite=Strict` on the cookie is the real defence, but
-   * the method should not be the weak part.
+   * Uses POST instead of GET because a logout reachable by <img src> is a
+   * nuisance an attacker can trigger cross-site. SameSite=Strict on the cookie
+   * provides the real defense, but the HTTP method should not be the weak link.
    */
   app.post('/logout', { schema: { response: { 200: LogoutResponse } } }, async (req, reply) => {
     await revokeSession(app.redis, req.session!);

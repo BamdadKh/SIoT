@@ -49,23 +49,22 @@ export async function buildApp() {
     // The wire protocol carries base64 blobs; keep a sane ceiling on record size.
     bodyLimit: 1024 * 1024,
 
-    // Fastify's Ajv defaults to `removeAdditional: true`, which silently strips
-    // properties an `additionalProperties: false` schema does not name. For this
-    // server that is the wrong default: a request carrying a field we never
-    // asked for means the client is out of spec, and the field it accidentally
-    // sent might be key material. Reject it visibly instead of quietly dropping
-    // it and returning 201.
+    // Fastify's Ajv defaults to `removeAdditional: true`, which silently strips properties
+    // an `additionalProperties: false` schema doesn't name. For this server that's the
+    // wrong default - if a request carries a field we never asked for, the client is out of
+    // spec, and the field it sent might be key material. We reject it visibly instead of
+    // quietly dropping it and returning 201.
     ajv: { customOptions: { removeAdditional: false } },
     ...(config.tlsEnabled ? { https: loadTlsCredentials() } : {}),
   }).withTypeProvider<TypeBoxTypeProvider>();
 
   if (!config.tlsEnabled) {
-    app.log.warn('TLS IS DISABLED — plaintext HTTP. Never do this outside local debugging.');
+    app.log.warn('TLS IS DISABLED: plaintext HTTP. Never do this outside local debugging.');
   }
 
-  // HSTS, but not in dev: the header is host-scoped and ignores the port, so
-  // pinning `localhost` to HTTPS would force it on every other project served
-  // from localhost on this machine, with a 1-year memory and no easy undo.
+  // HSTS is disabled in dev because the header is host-scoped and ignores the port.
+  // Pinning localhost to HTTPS would force it on every other project served from
+  // localhost on this machine for a year with no easy undo.
   if (!isDev) {
     app.addHook('onSend', async (_req, reply) => {
       reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');

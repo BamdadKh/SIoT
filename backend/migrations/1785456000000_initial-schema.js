@@ -1,5 +1,5 @@
 /**
- * Initial SIOT schema.
+ * Initial database schema for SIoT.
  *
  * Everything the server stores is either an opaque blob or a value the design
  * document explicitly permits it to see in plaintext (Section 5.2):

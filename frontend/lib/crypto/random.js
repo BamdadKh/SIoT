@@ -12,7 +12,7 @@ const webcrypto = globalThis.crypto;
 
 if (typeof webcrypto?.getRandomValues !== 'function') {
   // Failing at import time is deliberate. There is no fallback RNG to degrade to.
-  throw new Error('Web Crypto getRandomValues is unavailable — refusing to load SIOT crypto');
+  throw new Error('Web Crypto getRandomValues unavailable; refusing to load SIoT crypto');
 }
 
 /** Per-user signup salt, 128-bit (design Section 2.1). */

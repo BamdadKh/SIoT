@@ -1,5 +1,5 @@
 // Throwaway spike: unencrypted HTTP button counter, used only to validate the
-// ESP32 -> server path. None of the SIOT wire protocol lives here yet.
+// ESP32 -> server path. None of the SIoT wire protocol lives here yet.
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -7,7 +7,7 @@
 #include "secrets.h"  // copy secrets.example.h -> secrets.h; gitignored
 
 const int buttonPin = 12;
-const String endpointURL = SIOT_ENDPOINT;
+const String endpointURL = SIoT_ENDPOINT;
 const String buttonPath = "/button";
 
 const char* wifiSSID = WIFI_SSID;
