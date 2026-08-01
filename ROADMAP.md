@@ -109,30 +109,50 @@ Granular, ordered task list derived from `SIOT_Design_Document.md`. Check items 
 > decision for its own step rather than something to smuggle in here.
 
 ### 2.4 Login — client
-- [ ] Login form UI
-- [ ] Fetch salt via `/salt`, derive login_key locally
-- [ ] POST `/login` with `{ username, login_key }`
-- [ ] On success, store session cookie (browser handles automatically via `HttpOnly`), keep `kek`/`vault_key` in memory only (never persisted to localStorage)
+- [x] Login form UI — another panel in the test console; 0.4 is still deferred
+- [x] Fetch salt via `/salt`, derive login_key locally
+- [x] POST `/login` with `{ username, login_key }`
+- [x] On success, store session cookie (browser handles automatically via `HttpOnly`), keep `kek`/`vault_key` in memory only (never persisted to localStorage) — `kek` is held in a module-scoped variable for 2.7 to unwrap with, and zeroed if a later login fails. The panel asserts `document.cookie` cannot see the session, so a regression in the cookie flags shows up as a red pill rather than silently
 
 ### 2.5 Login — server
-- [ ] Route `POST /login`: rate limit by account + by source IP (pick a limiter — e.g. `@fastify/rate-limit` or custom Redis counter)
-- [ ] Exponential backoff tracking (store attempt count + last attempt time in Redis per account)
-- [ ] Constant-time comparison of `Argon2id(login_key)` against stored hash
-- [ ] On match: create session in Redis (256-bit CSPRNG id, store `Argon2id(session_id)` or SHA-256 hash of it, not raw)
-- [ ] Set cookie `HttpOnly; Secure; SameSite=Strict` with absolute TTL + idle timeout
-- [ ] On mismatch: generic error, no distinction between "no such user" and "wrong password"
+- [x] Route `POST /login`: rate limit by account + by source IP (pick a limiter — e.g. `@fastify/rate-limit` or custom Redis counter) — **custom Redis counter** (`src/lib/rate-limit.ts`). `@fastify/rate-limit` budgets *requests*; what is needed here is a failure ladder that only advances on a wrong answer and survives a restart
+- [x] Exponential backoff tracking (store attempt count + last attempt time in Redis per account) — counter and lock are separate keys, so serving one wait does not reset the ladder. Account: 5 free, then 2s doubling to a 15 min cap. Address: 30 free, 1s doubling to the same cap, and *not* cleared on success — one account of their own would otherwise let a stuffer reset the sweep limit at will
+- [x] Constant-time comparison of `Argon2id(login_key)` against stored hash — Argon2's own `verify`, never `===`
+- [x] On match: create session in Redis (256-bit CSPRNG id, store `Argon2id(session_id)` or SHA-256 hash of it, not raw) — SHA-256: the id is already 256 bits of CSPRNG, so a slow hash buys nothing and would be a DoS surface on every authenticated request
+- [x] Set cookie `HttpOnly; Secure; SameSite=Strict` with absolute TTL + idle timeout — idle 30 min as the Redis TTL, absolute 12 h stored on the record; `Secure` tracks `TLS_ENABLED` so the unsupported plaintext hatch fails loudly rather than silently dropping the cookie
+- [x] On mismatch: generic error, no distinction between "no such user" and "wrong password"
+- [x] Added: unknown usernames verify against a decoy hash, so the *timing* does not distinguish them either — measured 22 ms unknown vs 21 ms wrong-password. Without it the two differ by ~20 ms and login becomes the account oracle `GET /salt` was hardened against
+
+> **Deviation worth knowing about.** `@node-rs/argon2` 2.0.2 accepts a `Uint8Array`
+> password on `hash` but decodes it as UTF-8 on `verify`, so raw `login_key` bytes hash
+> fine and then always fail to verify. Both calls now go through one `argon2Input()`
+> helper that base64s the key first — injective over a fixed 32 bytes, so no entropy is
+> lost. **Any account created before this change cannot log in**; the stored hash was
+> computed over different input. Dev data only, so they were left alone rather than
+> migrated.
 
 ### 2.6 Session middleware & logout
-- [ ] Fastify hook: extract session cookie, hash it, look up in Redis, attach `userId` to request
-- [ ] Reject/401 requests with missing or invalid session
-- [ ] Route `POST /logout`: delete the one Redis session entry
-- [ ] Route `POST /logout-everywhere`: delete all Redis entries for that user
-- [ ] Test full loop: signup → login → authenticated request → logout → request now rejected
+- [x] Fastify hook: extract session cookie, hash it, look up in Redis, attach `userId` to request — attaches `req.session = { userId, idHash }`; the hook also slides the idle TTL, clamped so it can never push a session past its absolute deadline
+- [x] Reject/401 requests with missing or invalid session — one message for absent, forged, idled-out and revoked alike, and a dead cookie is cleared so the browser stops replaying it
+- [x] Route `POST /logout`: delete the one Redis session entry
+- [x] Route `POST /logout-everywhere`: delete all Redis entries for that user
+- [x] Test full loop: signup → login → authenticated request → logout → request now rejected — plus three concurrent sessions killed from one of them, verified down to Redis holding no keys for that user afterwards
+- [x] Added `GET /session` → `{ username }`. Not in the plan, but every client needs one call on page load to choose between the dashboard and the login form, and without it 2.6 has nothing to authenticate
+
+> **Deviation: the hook is scoped, not global-with-an-allowlist.** Authenticated routes are
+> registered inside a Fastify encapsulation scope that owns the `onRequest` hook, so a route
+> is protected by *where it is registered*. An allowlist fails open when someone forgets to
+> add a path; this fails closed. Phase 6's `POST /records` is device-authenticated by
+> signature rather than by session, so it will need its own scope rather than this one.
 
 ### 2.7 vault_key retrieval after login
-- [ ] Route `GET /vault-key` (authenticated): returns `wrapped_vault_key`
-- [ ] Client unwraps it locally with `kek` to get `vault_key`, holds in memory
-- [ ] Test: server response alone is useless without `kek`
+- [x] Route `GET /vault-key` (authenticated): returns `wrapped_vault_key` — kept separate from the `/login` response on purpose, so a client with a live session but no `kek` (a reload) can tell the two states apart
+- [x] Client unwraps it locally with `kek` to get `vault_key`, holds in memory — in the same closure as `kek`, which is why the panel is wired inside the login script rather than its own block
+- [x] Test: server response alone is useless without `kek` — the 60-byte blob refuses a stranger's `kek`, the `login_key` the server actually stores, a `kek` with one bit flipped, and the stored salt run against a wrong password guess. Confirmed in the browser too: after a reload `GET /session` still returns 200 while the vault panel has nothing to open the blob with
+
+> Wire-format byte lengths moved to `src/lib/wire-format.ts` — `/signup` and `/vault-key`
+> both encode `wrapped_vault_key`, and two copies of "60" drifting apart is how a length
+> check ends up validating nothing.
 
 ---
 

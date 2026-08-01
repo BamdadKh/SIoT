@@ -291,6 +291,102 @@
           <span class="label" style="font-size: 0.85rem" id="k-note"></span>
         </div>
       </section>
+
+      <section>
+        <h2>Login (Phase 2.4)</h2>
+        <p class="sub" style="margin: -0.35rem 0 0.9rem">
+          Fetches the salt, derives locally, POSTs only <code>{ username, login_key }</code>.
+          <code>kek</code> never leaves this page. Get the password wrong six times to watch
+          the backoff arm itself.
+        </p>
+        <div class="row">
+          <span class="label">username</span>
+          <input type="text" id="l-username" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="row">
+          <span class="label">password</span>
+          <input type="password" id="l-password" autocomplete="current-password" />
+        </div>
+        <div class="row">
+          <span class="label">salt from /salt</span>
+          <span class="mono-val" id="l-salt">—</span>
+        </div>
+        <div class="row">
+          <span class="label">login_key → server</span>
+          <span class="mono-val" id="l-loginkey">—</span>
+        </div>
+        <div class="row">
+          <span class="label">kek</span>
+          <span class="mono-val" id="l-kek">—</span>
+        </div>
+        <div class="row">
+          <span class="label">
+            session cookie via <code>document.cookie</code><br /><small>
+              HttpOnly — JS must not see it
+            </small>
+          </span>
+          <span class="pill" id="l-cookie" data-state="">—</span>
+        </div>
+        <div class="row" style="border-top: 1px solid var(--border); padding-top: 0.85rem">
+          <button id="l-submit">POST /login</button>
+          <span class="pill" id="l-status" data-state="">—</span>
+        </div>
+        <div class="row"><pre id="l-raw" style="width: 100%">no request yet</pre></div>
+      </section>
+
+      <section>
+        <h2>Session (Phase 2.6)</h2>
+        <p class="sub" style="margin: -0.35rem 0 0.9rem">
+          The cookie set by login, used and then thrown away. Log in twice in two tabs and
+          <code>logout-everywhere</code> from one — the other stops working immediately, which
+          is the whole reason sessions live in Redis instead of a signed token.
+        </p>
+        <div class="row">
+          <span class="label">who am I</span>
+          <span class="mono-val" id="v-who">—</span>
+        </div>
+        <div class="row">
+          <span class="label">last call</span>
+          <span class="pill" id="v-status" data-state="">—</span>
+        </div>
+        <div class="row" style="border-top: 1px solid var(--border); padding-top: 0.85rem">
+          <span style="display: flex; gap: 0.5rem; flex-wrap: wrap">
+            <button id="v-check">GET /session</button>
+            <button id="v-logout">POST /logout</button>
+            <button id="v-logout-all">POST /logout-everywhere</button>
+          </span>
+        </div>
+        <div class="row"><pre id="v-raw" style="width: 100%">no request yet</pre></div>
+      </section>
+
+      <section>
+        <h2>Vault key (Phase 2.7)</h2>
+        <p class="sub" style="margin: -0.35rem 0 0.9rem">
+          The first response the server cannot read. It returns 60 sealed bytes; the
+          <code>kek</code> that opens them was derived at login and is sitting in a closure on
+          this page. Log in above first — a reload loses the <code>kek</code> and this stops
+          working even though the session is still perfectly valid.
+        </p>
+        <div class="row">
+          <span class="label">wrapped_vault_key from server</span>
+          <span class="mono-val" id="vk-wrapped">—</span>
+        </div>
+        <div class="row">
+          <span class="label">vault_key after unwrap<br /><small>never on the wire</small></span>
+          <span class="mono-val" id="vk-vaultkey">—</span>
+        </div>
+        <div class="row">
+          <span class="label">
+            same blob, someone else's kek<br /><small>this is the zero-knowledge claim</small>
+          </span>
+          <span class="pill" id="vk-nokek" data-state="">—</span>
+        </div>
+        <div class="row" style="border-top: 1px solid var(--border); padding-top: 0.85rem">
+          <button id="vk-fetch">GET /vault-key</button>
+          <span class="pill" id="vk-status" data-state="">—</span>
+        </div>
+        <div class="row"><pre id="vk-raw" style="width: 100%">no request yet</pre></div>
+      </section>
     </main>
 
     <script>
@@ -563,6 +659,207 @@
       }
 
       el('k-lookup').addEventListener('click', lookup);
+    </script>
+
+    <script type="module">
+      // Phase 2.4 — login. Same derivation as signup, one branch shorter: the
+      // salt comes from the server instead of the CSPRNG, and only login_key is
+      // posted. kek is derived here and stays here.
+      import {
+        deriveAccountKeys,
+        generateVaultKey,
+        unwrapVaultKey,
+        fromBase64Url,
+        toBase64Url,
+        SALT_BYTES,
+      } from './lib/crypto/index.js';
+
+      const el = (id) => document.getElementById(id);
+      const short = (bytes) => `${toBase64Url(bytes).slice(0, 22)}…`;
+
+      function set(id, value, state) {
+        const node = el(id);
+        node.textContent = value;
+        if (state !== undefined) node.dataset.state = state;
+      }
+
+      // In memory only — never localStorage, never sessionStorage, never a
+      // cookie. A reload is meant to lose these and force the password again;
+      // that is the cost of the server not being able to help you recover them.
+      // Both live in this closure so nothing else on the page can reach them,
+      // which is why the 2.7 panel is wired up here rather than in its own
+      // script block.
+      let kek = null;
+      let vaultKey = null;
+
+      async function login() {
+        const username = el('l-username').value.trim();
+        const password = el('l-password').value;
+        if (!username || !password) {
+          set('l-status', 'missing fields', 'error');
+          return;
+        }
+
+        el('l-submit').disabled = true;
+        set('l-status', 'fetching salt…', '');
+
+        try {
+          const saltRes = await fetch(`/salt?username=${encodeURIComponent(username)}`);
+          if (!saltRes.ok) throw new Error(`GET /salt → HTTP ${saltRes.status}`);
+          const salt = fromBase64Url((await saltRes.json()).salt);
+          if (salt.length !== SALT_BYTES) throw new Error(`salt is ${salt.length}B`);
+          set('l-salt', toBase64Url(salt));
+
+          // A wrong password derives a wrong login_key here, on this machine.
+          // The server is told nothing about why it failed and could not work it
+          // out — it only ever sees a 32-byte value that does not match.
+          set('l-status', 'deriving…', '');
+          const derived = await deriveAccountKeys(password, salt);
+          el('l-password').value = '';
+
+          set('l-loginkey', short(derived.loginKey));
+          set('l-kek', `${short(derived.kek)} — stays local`);
+
+          const body = { username, login_key: toBase64Url(derived.loginKey) };
+          derived.loginKey.fill(0);
+
+          set('l-status', 'posting…', '');
+          const res = await fetch('/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const text = await res.text();
+          const retryAfter = res.headers.get('retry-after');
+          el('l-raw').textContent =
+            `HTTP ${res.status}${retryAfter ? ` (retry-after: ${retryAfter}s)` : ''}\n\n${text}`;
+
+          if (res.ok) {
+            // Replace, don't accumulate: the previous kek is dead the moment a
+            // new login succeeds, and so is anything unwrapped with it.
+            kek?.fill(0);
+            vaultKey?.fill(0);
+            vaultKey = null;
+            kek = derived.kek;
+            set('vk-vaultkey', '—');
+            set('vk-nokek', '—', '');
+            set('l-status', 'logged in', 'ok');
+          } else {
+            derived.kek.fill(0);
+            set('l-kek', '— (login failed)');
+            set('l-status', res.status === 429 ? 'throttled' : `rejected (${res.status})`, 'error');
+          }
+
+          // The cookie is set by now if login worked. If this ever shows the
+          // session id, HttpOnly has been lost and any XSS is a session theft.
+          const leaked = document.cookie.includes('siot_session');
+          set('l-cookie', leaked ? 'VISIBLE — HttpOnly broken' : 'invisible', leaked ? 'error' : 'ok');
+        } catch (err) {
+          set('l-status', 'failed', 'error');
+          el('l-raw').textContent = `request failed: ${err.message}`;
+          console.error(err);
+        } finally {
+          el('l-submit').disabled = false;
+        }
+      }
+
+      // Phase 2.7 — fetch the sealed vault_key and open it locally.
+      async function fetchVaultKey() {
+        if (!kek) {
+          set('vk-status', 'log in first', 'error');
+          el('vk-raw').textContent =
+            'No kek in memory. The session cookie may still be valid — that is the point: ' +
+            'authentication and the ability to decrypt are separate, and the server can only ' +
+            'ever give you the first one back.';
+          return;
+        }
+
+        el('vk-fetch').disabled = true;
+        set('vk-status', 'fetching…', '');
+
+        try {
+          const res = await fetch('/vault-key');
+          const text = await res.text();
+          el('vk-raw').textContent = `HTTP ${res.status}\n\n${text}`;
+          if (!res.ok) {
+            set('vk-status', `rejected (${res.status})`, 'error');
+            return;
+          }
+
+          const wrapped = fromBase64Url(JSON.parse(text).wrapped_vault_key);
+          set('vk-wrapped', `${short(wrapped)} (${wrapped.length}B)`);
+
+          vaultKey?.fill(0);
+          vaultKey = await unwrapVaultKey(wrapped, kek);
+          set('vk-vaultkey', `${short(vaultKey)} — held in memory`);
+
+          // 32 random bytes stand in for any other user's kek. If this ever
+          // succeeds, AES-GCM has stopped authenticating and the blob the server
+          // holds is no longer opaque to whoever holds it.
+          const strangerKek = generateVaultKey();
+          let rejected = false;
+          try {
+            await unwrapVaultKey(wrapped, strangerKek);
+          } catch {
+            rejected = true;
+          }
+          strangerKek.fill(0);
+          set('vk-nokek', rejected ? 'useless' : 'OPENED — BROKEN', rejected ? 'ok' : 'error');
+
+          set('vk-status', 'unwrapped', 'ok');
+        } catch (err) {
+          set('vk-status', 'failed', 'error');
+          el('vk-raw').textContent = `failed: ${err.message}`;
+          console.error(err);
+        } finally {
+          el('vk-fetch').disabled = false;
+        }
+      }
+
+      el('l-submit').addEventListener('click', login);
+      el('vk-fetch').addEventListener('click', fetchVaultKey);
+    </script>
+
+    <script>
+      // Phase 2.6 — session lifecycle. No crypto and no key material: the cookie
+      // does all the work, and this page never sees it.
+      (() => {
+        const el = (id) => document.getElementById(id);
+
+        function set(id, value, state) {
+          const node = el(id);
+          node.textContent = value;
+          if (state !== undefined) node.dataset.state = state;
+        }
+
+        async function call(path, method) {
+          const buttons = ['v-check', 'v-logout', 'v-logout-all'];
+          buttons.forEach((id) => (el(id).disabled = true));
+          try {
+            const res = await fetch(path, { method });
+            const text = await res.text();
+            el('v-raw').textContent = `${method} ${path}\nHTTP ${res.status}\n\n${text}`;
+            set('v-status', res.ok ? 'ok' : `${res.status}`, res.ok ? 'ok' : 'error');
+
+            if (path === '/session') {
+              set('v-who', res.ok ? JSON.parse(text).username : 'not logged in');
+            } else if (res.ok) {
+              // The cookie is gone now, here and on the server. Say so rather
+              // than leaving a stale username on screen.
+              set('v-who', 'logged out');
+            }
+          } catch (err) {
+            set('v-status', 'failed', 'error');
+            el('v-raw').textContent = `request failed: ${err.message}`;
+          } finally {
+            buttons.forEach((id) => (el(id).disabled = false));
+          }
+        }
+
+        el('v-check').addEventListener('click', () => call('/session', 'GET'));
+        el('v-logout').addEventListener('click', () => call('/logout', 'POST'));
+        el('v-logout-all').addEventListener('click', () => call('/logout-everywhere', 'POST'));
+      })();
     </script>
   </body>
 </html>

@@ -130,7 +130,21 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   that accidentally posts `kek` into a 201. Unknown fields are a 400.
 - **`@node-rs/argon2` for the server-side hash of `login_key`**, at m=19 MiB/t=2/p=1 — lighter
   than the client's m=64 MiB on purpose (see `src/lib/login-key.ts` for why that isn't a
-  weakening). Never import it into anything that touches `kek`.
+  weakening). Never import it into anything that touches `kek`. Its 2.0.2 `verify` decodes the
+  password as UTF-8 even though `hash` takes bytes, so both go through `argon2Input()`, which
+  base64s the key first. Hashing one encoding and verifying another rejects every correct
+  password, so that helper is not optional on either path.
+- **Login throttling is a hand-rolled Redis counter**, not `@fastify/rate-limit`. A request
+  budget is the wrong shape: the ladder must advance only on a *wrong* answer, survive a
+  restart, and key on account and source address independently. See `src/lib/rate-limit.ts`.
+- **Unknown usernames still pay for an Argon2 verify**, against a decoy hash of random bytes.
+  A fast 401 for "no such account" and a slow one for "wrong password" is a cleaner account
+  oracle than anything `GET /salt` defends against.
+- **Authenticated routes are protected by their Fastify scope, not by an allowlist.** `app.ts`
+  registers them inside a plugin that owns the `requireSession` hook; put a new route there
+  and it is protected, put it outside and it is public. The mistake this shape makes easy is
+  an unexpected 401, not an open endpoint. Phase 6's `POST /records` authenticates by device
+  signature instead and needs its own scope.
 - **HSTS is set in production only.** The header is host-scoped and ignores the port, so
   emitting it on `localhost` would force HTTPS on every other project served from localhost
   on this machine, for a year, with no convenient undo.
@@ -147,7 +161,7 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
 
 ## Current state
 
-**Phases 0 and 1 complete; Phase 2 in progress (2.1–2.2 done).** Server boots over HTTPS,
+**Phases 0, 1 and 2 complete.** Server boots over HTTPS,
 connects to Postgres and Redis, health check reports both and 503s when either is down, schema
 is migrated. The full client key hierarchy of Section 2.1 exists in `frontend/lib/crypto/` —
 Argon2id → master_key → HKDF → `login_key`/`kek`, plus `vault_key` generation and AES-256-GCM
@@ -157,8 +171,20 @@ modules in a real browser.
 `POST /signup` works end-to-end: the test console derives everything locally and posts only
 `{ username, salt, login_key, wrapped_vault_key }`; the server Argon2id-hashes `login_key` and
 writes the row. `GET /salt` returns the stored salt for real accounts and an HMAC decoy for
-unknown ones, structurally and timing-wise identical. There are still **no sessions** —
-nothing is authenticated, and `/health`, `/signup`, `/salt` are the only routes.
+unknown ones, structurally and timing-wise identical.
+
+`POST /login` completes the loop: throttle check, Argon2id verify (against a decoy hash when
+the account does not exist), then a session in Redis under `sess:<sha256(id)>` with a 30 min
+idle TTL and a 12 h absolute cap, delivered as `HttpOnly; Secure; SameSite=Strict`. The session
+lifecycle is closed: `requireSession` resolves the cookie and slides the idle window,
+`GET /session` says who you are, and `POST /logout` / `POST /logout-everywhere` revoke one or
+all. `GET /vault-key` returns the sealed 60-byte blob, which the client opens with the `kek` it
+still holds from login — the first response the server hands back that it cannot read itself.
+Routes are `/health`, `/signup`, `/salt`, `/login`, `/session`, `/logout`, `/logout-everywhere`,
+`/vault-key`.
+
+**Accounts created before the `argon2Input()` fix cannot log in.** Their `login_key_hash` was
+computed over raw bytes rather than the base64 form. Dev data only; sign up again.
 
 `backend/` has no test harness. Everything so far was verified by hand against a running
 server; the frontend's `node --test` suite covers `lib/crypto/` only. Phase 2.5 onwards is
@@ -168,5 +194,6 @@ where that stops being tenable.
 server** — its `POST /button` endpoint is gone and the server is HTTPS-only. That is intended;
 it gets replaced wholesale by the SIOT library in Phase 5.
 
-Next up is roadmap 2.4–2.5 — login, which needs a Redis-backed rate limiter and session store
-before it can land safely.
+Next up is Phase 3 — vault storage: `PUT /vault` / `GET /vault`, version-based conflict and
+rollback detection, then the password change flow. The client already holds an unwrapped
+`vault_key` after login, so 3.1 has everything it needs.
