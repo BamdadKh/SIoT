@@ -387,6 +387,59 @@
         </div>
         <div class="row"><pre id="vk-raw" style="width: 100%">no request yet</pre></div>
       </section>
+
+      <section>
+        <h2>Vault contents (Phase 3.1 / 3.2)</h2>
+        <p class="sub" style="margin: -0.35rem 0 0.9rem">
+          The vault document itself, sealed under <code>vault_key</code>. Open the vault key
+          panel above first. Save a couple of times and watch the version climb — then try
+          saving at a version the server has already passed, which is what a second tab racing
+          this one would do.
+        </p>
+        <div class="row">
+          <span class="label">document<br /><small>plaintext, this machine only</small></span>
+          <textarea
+            id="vd-doc"
+            spellcheck="false"
+            rows="4"
+            style="
+              min-width: 22rem;
+              flex: 1;
+              font-family: inherit;
+              font-size: 0.85rem;
+              background: var(--bg);
+              color: var(--text);
+              border: 1px solid var(--border);
+              border-radius: 6px;
+              padding: 0.4rem 0.55rem;
+            "
+>{ "devices": [], "note": "nothing here yet — Phase 4 fills this in" }</textarea
+          >
+        </div>
+        <div class="row">
+          <span class="label">server version</span>
+          <span class="mono-val" id="vd-version">—</span>
+        </div>
+        <div class="row">
+          <span class="label">ciphertext held by server</span>
+          <span class="mono-val" id="vd-cipher">—</span>
+        </div>
+        <div class="row">
+          <span class="label">
+            same blob, wrong version claimed<br /><small>the rollback AAD catches</small>
+          </span>
+          <span class="pill" id="vd-rollback" data-state="">—</span>
+        </div>
+        <div class="row" style="border-top: 1px solid var(--border); padding-top: 0.85rem">
+          <span style="display: flex; gap: 0.5rem; flex-wrap: wrap">
+            <button id="vd-get">GET /vault</button>
+            <button id="vd-put">PUT /vault</button>
+            <button id="vd-stale">PUT /vault (stale version)</button>
+          </span>
+          <span class="pill" id="vd-status" data-state="">—</span>
+        </div>
+        <div class="row"><pre id="vd-raw" style="width: 100%">no request yet</pre></div>
+      </section>
     </main>
 
     <script>
@@ -669,6 +722,8 @@
         deriveAccountKeys,
         generateVaultKey,
         unwrapVaultKey,
+        encryptVault,
+        decryptVault,
         fromBase64Url,
         toBase64Url,
         SALT_BYTES,
@@ -816,8 +871,146 @@
         }
       }
 
+      // Phase 3.1/3.2 — the vault document. Wired here rather than in its own
+      // block for the same reason 2.7 is: `vaultKey` lives in this closure and
+      // is not going anywhere it can be reached from.
+      //
+      // The version the server last told us about. Not a rollback defence — that
+      // needs storage that survives a reload (IndexedDB, roadmap 3.2) — just
+      // enough state to compose the next write.
+      let serverVersion = null;
+
+      const vaultButtons = ['vd-get', 'vd-put', 'vd-stale'];
+
+      function vaultBusy(busy) {
+        vaultButtons.forEach((id) => (el(id).disabled = busy));
+      }
+
+      function requireVaultKey() {
+        if (vaultKey) return true;
+        set('vd-status', 'open the vault key first', 'error');
+        el('vd-raw').textContent =
+          'No vault_key in memory. Run GET /vault-key above — with a valid session but no ' +
+          'vault_key this panel can reach the ciphertext and still do nothing with it, ' +
+          'which is the same position the server is permanently in.';
+        return false;
+      }
+
+      async function getVault() {
+        if (!requireVaultKey()) return;
+        vaultBusy(true);
+        set('vd-status', 'fetching…', '');
+
+        try {
+          const res = await fetch('/vault');
+          const text = await res.text();
+          el('vd-raw').textContent = `GET /vault\nHTTP ${res.status}\n\n${text}`;
+          if (!res.ok) {
+            set('vd-status', `rejected (${res.status})`, 'error');
+            return;
+          }
+
+          const body = JSON.parse(text);
+          serverVersion = body.vault_version;
+          set('vd-version', String(serverVersion));
+
+          if (body.ciphertext === null) {
+            set('vd-cipher', '— (nothing written yet)');
+            set('vd-rollback', '—', '');
+            set('vd-status', 'empty vault', 'ok');
+            return;
+          }
+
+          const blob = fromBase64Url(body.ciphertext);
+          set('vd-cipher', `${short(blob)} (${blob.length}B)`);
+
+          const contents = await decryptVault(blob, vaultKey, serverVersion);
+          el('vd-doc').value = JSON.stringify(contents, null, 2);
+
+          // The same bytes, offered as any other version. If this ever opens,
+          // the server can serve a stale vault under a fresh version number and
+          // the client has no way to notice.
+          let refused = true;
+          try {
+            await decryptVault(blob, vaultKey, serverVersion + 1);
+            refused = false;
+          } catch {
+            /* expected: the AAD pins the version */
+          }
+          set('vd-rollback', refused ? 'refused' : 'OPENED — BROKEN', refused ? 'ok' : 'error');
+
+          set('vd-status', 'decrypted', 'ok');
+        } catch (err) {
+          set('vd-status', 'failed', 'error');
+          el('vd-raw').textContent = `failed: ${err.message}`;
+          console.error(err);
+        } finally {
+          vaultBusy(false);
+        }
+      }
+
+      /**
+       * @param {boolean} stale post a version the server has already consumed,
+       *        which is what the losing side of two simultaneous saves looks like.
+       */
+      async function putVault(stale) {
+        if (!requireVaultKey()) return;
+        if (serverVersion === null) {
+          set('vd-status', 'GET /vault first', 'error');
+          return;
+        }
+
+        let contents;
+        try {
+          contents = JSON.parse(el('vd-doc').value);
+        } catch (err) {
+          set('vd-status', 'document is not JSON', 'error');
+          el('vd-raw').textContent = `local parse failed: ${err.message}`;
+          return;
+        }
+
+        vaultBusy(true);
+        set('vd-status', 'sealing…', '');
+
+        try {
+          const version = stale ? serverVersion : serverVersion + 1;
+          const blob = await encryptVault(contents, vaultKey, version);
+
+          const res = await fetch('/vault', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ vault_version: version, ciphertext: toBase64Url(blob) }),
+          });
+          const text = await res.text();
+          el('vd-raw').textContent =
+            `PUT /vault (claiming version ${version})\nHTTP ${res.status}\n\n${text}`;
+
+          if (res.ok) {
+            serverVersion = JSON.parse(text).vault_version;
+            set('vd-version', String(serverVersion));
+            set('vd-cipher', `${short(blob)} (${blob.length}B)`);
+            set('vd-status', `saved as v${serverVersion}`, 'ok');
+          } else if (res.status === 409) {
+            // The intended outcome of the stale button, and the only thing that
+            // stands between two tabs and one of them silently winning.
+            set('vd-status', 'conflict — refused', stale ? 'ok' : 'error');
+          } else {
+            set('vd-status', `rejected (${res.status})`, 'error');
+          }
+        } catch (err) {
+          set('vd-status', 'failed', 'error');
+          el('vd-raw').textContent = `failed: ${err.message}`;
+          console.error(err);
+        } finally {
+          vaultBusy(false);
+        }
+      }
+
       el('l-submit').addEventListener('click', login);
       el('vk-fetch').addEventListener('click', fetchVaultKey);
+      el('vd-get').addEventListener('click', getVault);
+      el('vd-put').addEventListener('click', () => putVault(false));
+      el('vd-stale').addEventListener('click', () => putVault(true));
     </script>
 
     <script>
