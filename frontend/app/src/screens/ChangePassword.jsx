@@ -43,7 +43,7 @@ export function ChangePassword({ username, onSignOut, signingOut }) {
   async function handleSubmit(event) {
     event.preventDefault();
 
-    const complaint = check(newPassword, confirmation);
+    const complaint = check(currentPassword, newPassword, confirmation);
     if (complaint) {
       setError(complaint);
       setDone(false);
@@ -105,6 +105,20 @@ export function ChangePassword({ username, onSignOut, signingOut }) {
 
   const canSubmit = currentPassword && newPassword && confirmation;
 
+  /**
+   * The one repeatable action in the app, so it is the one screen that can end
+   * up showing a confirmation over a form someone has already started refilling.
+   * "Password changed" has to stop being said the moment it stops being what
+   * this form is about. The error stays until the next submit, the way it does
+   * on Sign in and Create account.
+   */
+  function edit(setter) {
+    return (value) => {
+      setter(value);
+      setDone(false);
+    };
+  }
+
   return (
     <Plate>
       <div className="wordmark" style={{ marginBottom: 'var(--sp-5)' }}>
@@ -122,7 +136,7 @@ export function ChangePassword({ username, onSignOut, signingOut }) {
             label="Current password"
             type="password"
             value={currentPassword}
-            onChange={setCurrentPassword}
+            onChange={edit(setCurrentPassword)}
             disabled={Boolean(busy)}
             autoComplete="current-password"
             autoFocus
@@ -131,7 +145,7 @@ export function ChangePassword({ username, onSignOut, signingOut }) {
             label="New password"
             type="password"
             value={newPassword}
-            onChange={setNewPassword}
+            onChange={edit(setNewPassword)}
             disabled={Boolean(busy)}
             autoComplete="new-password"
           />
@@ -139,7 +153,7 @@ export function ChangePassword({ username, onSignOut, signingOut }) {
             label="New password again"
             type="password"
             value={confirmation}
-            onChange={setConfirmation}
+            onChange={edit(setConfirmation)}
             disabled={Boolean(busy)}
             autoComplete="new-password"
           />
@@ -182,12 +196,19 @@ export function ChangePassword({ username, onSignOut, signingOut }) {
   );
 }
 
-function check(newPassword, confirmation) {
+function check(currentPassword, newPassword, confirmation) {
   if (newPassword.length < MIN_PASSWORD) {
-    return `Use at least ${MIN_PASSWORD} characters.`;
+    return `Use at least ${MIN_PASSWORD} characters. There is still no reset, so pick something you will not lose.`;
   }
   if (newPassword !== confirmation) {
     return 'Those two new passwords are not the same.';
+  }
+  // Caught here rather than at the server, which would happily accept it: a new
+  // salt and a re-wrap under the same password succeed and change nothing, and
+  // "Password changed" over a password that did not change is the one message
+  // this screen must never show.
+  if (newPassword === currentPassword) {
+    return 'That is the password you already have. Pick a different one.';
   }
   return null;
 }
