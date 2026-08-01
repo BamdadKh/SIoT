@@ -46,6 +46,16 @@ function devCertificate() {
 export default defineConfig({
   root: 'app',
   plugins: [react()],
+  resolve: {
+    /**
+     * The crypto stays at `frontend/lib/crypto/`, outside the app root, and is
+     * reached by one alias rather than by `../../../lib` from every screen.
+     * Keeping it out of `app/` is the point: `node --test` runs those exact
+     * files, so the modules the tests cover are byte-identical to the ones the
+     * browser loads — no bundler-only copy that could drift.
+     */
+    alias: { '@siot/crypto': here('lib/crypto/index.js') },
+  },
   build: {
     outDir: '../dist',
     emptyOutDir: true,
@@ -53,6 +63,9 @@ export default defineConfig({
   server: {
     port: 5173,
     https: devCertificate(),
+    // The alias resolves above `root`, which the dev server refuses to serve
+    // from unless the parent is allowed explicitly.
+    fs: { allow: [here('.')] },
     proxy: Object.fromEntries(
       API_PATHS.map((path) => [
         path,
