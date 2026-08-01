@@ -57,7 +57,7 @@ a:hover {
   font-weight: 700;
   font-size: 17px;
   letter-spacing: 0.1em;
-  color: var(--olive);
+  color: var(--rust);
 }
 
 .h1,
@@ -143,8 +143,9 @@ a:hover {
   pointer-events: none;
 }
 
-/* The datum. On a survey drawing one corner carries the origin mark and the
-   others are plain registration; drawing all four the same throws that away. */
+/* All four the same, and all four rust. The ticks are the mark, not a status
+   readout: they look identical on every screen and in every state, so nothing
+   about them has to be decoded. */
 .tick-tl {
   top: -1px;
   left: -1px;
@@ -155,22 +156,22 @@ a:hover {
 .tick-tr {
   top: -1px;
   right: -1px;
-  border-top: 2px solid var(--olive);
-  border-right: 2px solid var(--olive);
+  border-top: 2px solid var(--rust);
+  border-right: 2px solid var(--rust);
 }
 
 .tick-bl {
   bottom: -1px;
   left: -1px;
-  border-bottom: 2px solid var(--olive);
-  border-left: 2px solid var(--olive);
+  border-bottom: 2px solid var(--rust);
+  border-left: 2px solid var(--rust);
 }
 
 .tick-br {
   bottom: -1px;
   right: -1px;
-  border-bottom: 2px solid var(--olive);
-  border-right: 2px solid var(--olive);
+  border-bottom: 2px solid var(--rust);
+  border-right: 2px solid var(--rust);
 }
 
 /* --- fields -------------------------------------------------------------- */
