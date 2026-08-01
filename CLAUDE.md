@@ -149,16 +149,29 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   — old blob, honestly labelled — which is what the client's cached high-water mark is for.
 - **`PUT /vault` conflicts are a single-statement compare-and-swap**, not a read-then-write.
   Two tabs saving at once must not both pass; a `select` followed by an `update` lets them.
-- **Credentials reach a board by copy-paste, not Web Serial** (design 5.3.1). The client shows
-  `DEVICE_ID` and `DEVICE_SECRET` as a pasteable `#define` pair in base64url; the user drops
-  them into their own sketch. Web Serial writing NVS is a later upgrade (5.3.2), not a
-  prerequisite — it is Chromium-only and ESP32-only, and gating provisioning on it contradicted
-  publishing the wire protocol for third-party ports. Cryptographically the two are identical:
-  the server sees exactly the same nothing. What copy-paste actually costs is worth remembering
-  rather than rediscovering — the secret transits the clipboard into a source file (hence
-  `siot_credentials.h`, gitignored), and the overwrite check in 5.4 cannot exist without a
-  channel to the board. Say both in the UI at the moment of handover; do not let them live only
-  in the design doc.
+- **One supported hardware path: ESP32, credentials written to NVS over Web Serial** (design
+  5.3). Chromium-only and ESP32-only is a deliberate narrowing, not a gap to fill. Copy-paste
+  was tried as the default and reverted: it costs the three properties the guided flow exists
+  to provide — no clipboard exposure, no secret in source control, and the overwrite check in
+  5.4, which cannot exist without a channel to the board. Other hardware is served by a
+  published protocol (`docs/protocol.md`, Phase 4.7) plus a reveal button, not by a second
+  guided flow.
+- **"Reveal credentials" is an escape hatch and must not be shaped like a path.** Reached by a
+  deliberate action on an existing device, never offered during setup; reveals on demand and
+  does not stay revealed; states its costs at the moment of revealing. Past that button the
+  guarantees in the design document genuinely stop, and a flow that made it look routine would
+  be misrepresenting where the boundary is.
+- **Device names live in the vault, encrypted.** There is no `name` column on `devices` and
+  adding one is the kind of change the one rule exists to catch — "bedroom motion sensor"
+  beside the upload timestamps the server already holds is a labelled occupancy log. Renaming
+  is an ordinary vault write. A locked vault can show `DEVICE_ID`s and liveness but no names,
+  which is the honest rendering of what the client actually knows.
+- **Liveness is derived from signed records, and is a lower bound.** The server cannot forge a
+  newer record at a higher `seq` (it lacks the signature), so it cannot make a dead device look
+  alive; it can withhold and make a live one look dead. Every freshness signal here fails in
+  that direction. So the UI shows *when a device was last heard from*, never asserts "offline"
+  as a fact about the device — a withholding server and a flat battery are indistinguishable
+  from the client.
 - **The backend serves `frontend/` statically in dev** (`SERVE_TEST_FRONTEND=true`). This is
   purely so the test console is same-origin — no CORS, and session cookies work unmodified.
   Delete it when the real client exists.

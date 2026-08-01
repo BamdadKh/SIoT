@@ -215,32 +215,24 @@ Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items 
 - [ ] Route `POST /devices/register` (authenticated): `{ device_id, sign_pub }`, enforce `device_id` uniqueness
 - [ ] Reject if `device_id` already exists
 
-### 4.3 Device secret storage in vault
+### 4.3 Device record in the vault
 - [ ] Client: encrypt `DEVICE_SECRET` under `vault_key`, add entry to vault's device list
+- [ ] Include the user's **name** for the device in that entry (design 5.5) — the name lives in the vault and nowhere else; there is no `name` column on `devices` and adding one would be wrong
+- [ ] Ask for the name during setup, before the device exists, so nothing is ever displayed as a bare `DEVICE_ID`
+- [ ] Rename is just a vault write — same `PUT /vault` path, same version bump, no new endpoint
 - [ ] Re-save vault via existing `PUT /vault` path (bump version)
 
-### 4.4 Credential handover — copy-paste (the v1 path)
-> **Changed from the original plan.** This used to be "Web Serial provisioning tool" and nothing
-> else. Web Serial is Chromium-only and the NVS partition scheme is ESP32-only, so the single
-> supported path excluded most hardware — which sits badly against publishing the wire protocol
-> for third-party ports. Copy-paste works everywhere and costs nothing cryptographically: the
-> server sees no more and no less than it would have. See design Section 5.3.1.
-
-- [ ] Screen: after generating a device, show `DEVICE_ID` + `DEVICE_SECRET` as a ready-to-paste C++ snippet (`#define SIOT_DEVICE_ID` / `SIOT_DEVICE_SECRET`, base64url), with a copy button
-- [ ] Tell the user, at the moment of handover, what they are holding: put it in a gitignored `siot_credentials.h`, and it is the only copy outside the vault
-- [ ] Say plainly that there is no overwrite protection on this path (design 5.4) — nothing stops a board being provisioned twice under two vault records
-- [ ] Offer to show it again from the vault later, rather than making the first view load-bearing
-- [ ] Never persist the plaintext secret anywhere outside the vault — not localStorage, not a downloaded file by default
-
-### 4.5 Credential handover — Web Serial to NVS (deferred)
-> **Deliberately not in v1.** It is an upgrade to a path that already works, not a prerequisite
-> for one, and it only applies on Chromium + ESP32. It is still worth building: it keeps the
-> secret out of the clipboard and out of source control, which is the one respect in which 4.4
-> is genuinely weaker (design 5.3.2). Revisit after Phase 5 proves the library end-to-end.
+### 4.4 Web Serial provisioning tool — UI
+> **The supported path, and the only one the app walks a user through.** Chromium + ESP32 is a
+> deliberate narrowing (design 5.3, 6.1): it is what keeps the secret out of the clipboard and
+> out of source control, and it is the only way the overwrite check in 4.5 can exist at all.
+> Other hardware is served by the published protocol plus 4.6, not by a second guided flow.
 
 - [ ] Basic page: "Connect device" button using Web Serial API (`navigator.serial.requestPort`)
-- [ ] Handle browser support check (Web Serial is Chromium-only — surface a clear message otherwise)
-- [ ] UI flow: select vault device record → connect to board → write
+- [ ] Handle browser support check (Web Serial is Chromium-only — surface a clear message that names the reveal path in 4.6 rather than dead-ending)
+- [ ] UI flow: name the device → connect to board → write
+
+### 4.5 Web Serial provisioning tool — NVS write protocol
 - [ ] Define simple serial command protocol for the tool ↔ ESP32 bootstrap sketch (e.g. `READ_ID`, `WRITE_CREDS`)
 - [ ] Write a minimal "provisioning listener" Arduino sketch that just handles NVS read/write over serial (separate from application firmware)
 - [ ] Implement read-back: tool reads existing `DEVICE_ID` from NVS before writing
@@ -248,14 +240,45 @@ Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items 
 - [ ] Implement actual write of `DEVICE_ID` + `DEVICE_SECRET` to dedicated NVS partition
 - [ ] Test round-trip on a real ESP32: provision, power cycle, re-read confirms values persisted
 
+### 4.6 Reveal credentials — the escape hatch
+> Not a second supported path and must not be shaped like one (design 5.3.1). It exists so
+> somebody writing their own client for other hardware has something to provision it with;
+> without it the published protocol is an invitation with no key attached. Everything below the
+> credentials is identical, and the server cannot tell a conforming third-party client from the
+> reference library — which is the point.
+
+- [ ] "Reveal credentials" control on an existing device, never a step in setup
+- [ ] Decrypt from the vault in the browser and show `DEVICE_ID` + `DEVICE_SECRET` as base64url, with a copy button
+- [ ] Reveal on demand, do not stay revealed; never persist the plaintext outside the vault — not localStorage, not a downloaded file
+- [ ] State the costs at the moment of revealing, not in docs: it is now in the clipboard and wherever it goes next, there is no overwrite protection (design 5.4), and storage on the target hardware is the porter's problem including surviving a firmware update
+- [ ] Link to the protocol documentation (4.7) from here — a revealed secret with no spec beside it is the wrong half of the answer
+
+### 4.7 Protocol documentation for third-party clients
+> The other half of "one hardware target done properly". Section 7 of the design document is
+> already the byte-level contract; this is packaging it as something someone can build against
+> without reading the whole architecture.
+
+- [ ] Write `docs/protocol.md`: HKDF labels, AEAD parameters, nonce construction, AAD layout, CBOR payload shape, signature input, and the three server checks
+- [ ] Document the `POST /records` API surface: request shape, every rejection and what it means
+- [ ] State the non-negotiables for a port: persisted `boot_epoch`, exact HKDF labels, no invented equivalents
+- [ ] Publish known-answer test vectors — a port that cannot reproduce them is broken, and finding that out from a vector beats finding it out from a server rejection
+
+### 4.8 Device list — names and liveness
+- [ ] Route `GET /devices` (authenticated): the metadata the server legitimately holds per device — `device_id`, `last_seq`, and when its newest record arrived. No names, because it has none
+- [ ] Decide how last-seen is stored: `max(created_at)` over `records`, or a `last_seen_at` column on `devices` updated alongside `last_seq` in the Phase 6 insert. The column is a migration; pick one and say why
+- [ ] Client: join the server's list against the vault's device records by `DEVICE_ID`, so names come from the vault and liveness from the server
+- [ ] Show **when it was last heard from**, not just a dot (design 5.6) — devices report on wildly different schedules and a fixed threshold will call a healthy hourly sensor dead
+- [ ] Never phrase "offline" as a fact about the device: the client knows it has not received a record, not why. A withholding server is indistinguishable from a flat battery
+- [ ] Handle the two mismatch cases visibly: a device in the vault the server does not know, and a device the server reports that the vault has no record for (an orphan — see design 5.4)
+
 ---
 
 ## Phase 5 — ESP32 Library & Wire Protocol
 
 ### 5.1 Library skeleton
 - [ ] New Arduino/PlatformIO library project (`SIoT` lib) separate from example sketches
-- [ ] `SIoT.begin(deviceId, deviceSecret)` taking the two base64url strings the user pasted in — the v1 path (4.4), and the only one that works off ESP32
-- [ ] `SIoT.begin()` with no arguments, reading the same two values from the dedicated NVS partition — stubbed until 4.5 lands, so both entry points decode to identical bytes and everything below is shared
+- [ ] NVS read helpers for `DEVICE_ID` / `DEVICE_SECRET` from the dedicated partition
+- [ ] `SIoT.begin()` takes no credentials — on the supported path the device already has them (design 6)
 - [ ] Key derivation on-device: HKDF-SHA256 (need a small C++ implementation or existing lib — mbedTLS has primitives)
 - [ ] Derive `device_data_key` and `ed25519_seed` on boot
 
@@ -286,7 +309,7 @@ Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items 
 - [ ] End-to-end test against local dev server: one real reading, uploaded, verified
 
 ### 5.7 Example sketch
-- [ ] Minimal example: init library with pasted creds, define one reading (e.g. temperature), loop + upload every N seconds
+- [ ] Minimal example: `SIoT.begin()` reading NVS creds, define one reading (e.g. temperature), loop + upload every N seconds
 - [ ] Document in README how a user writes their own sketch against the library
 
 ---
@@ -359,7 +382,7 @@ Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items 
 
 ### 8.4 Revocation flow
 - [ ] UI messaging: "revoke" = rotate B's `DEVICE_SECRET` via re-provisioning, old data stays readable by A forever
-- [ ] Re-provisioning flow reuses the Phase 4 handover with a new `DEVICE_SECRET`, updates vault entry, old grants naturally stop covering new data — note that on the copy-paste path this means editing and reflashing the sketch, not just clicking through a tool
+- [ ] Re-provisioning flow reuses the Phase 4 tool with a new `DEVICE_SECRET`, updates vault entry, old grants naturally stop covering new data — the device's name should survive the rotation, since it is the same physical thing in the same place
 
 ---
 

@@ -118,6 +118,8 @@ The split is what makes read-only grants possible (Section 9). `device_data_key`
 | `DEVICE_ID` (128-bit random) | **Plaintext** | Lookup index; uniqueness enforced at registration |
 | `device_sign_pub` | **Plaintext** | Verifying upload signatures — it's a public key, publishing it leaks nothing |
 | `DEVICE_SECRET` | Encrypted in vault | Everything else; server never sees it |
+| Device name | Encrypted in vault | A label for the owner (5.5). Deliberately absent from the `devices` table — "bedroom motion sensor" next to upload timestamps is a labelled occupancy log |
+| Upload timing, record sizes, `last_seq` | **Plaintext, unavoidably** | Inherent to storing and validating records; read back as liveness (5.6). Accepted leakage, see 13.1 |
 
 `device_sign_pub` in plaintext is what lets an untrusted server authenticate device uploads without holding anything secret. This closes a gap in earlier revisions where nothing specified how the server distinguished a genuine upload from an attacker POSTing garbage to a known `DEVICE_ID`. Every obvious answer (like having the device present `DEVICE_SECRET`) handed the server the secret and collapsed the core guarantee.
 
@@ -125,51 +127,67 @@ The split is what makes read-only grants possible (Section 9). `device_data_key`
 
 ### 5.3 Provisioning flow
 
-Steps 1–3 are the whole security-relevant part and are identical no matter what hardware is on the other end:
+**The supported path is ESP32, and the browser drives it end to end:**
 
 1. Browser generates `DEVICE_ID` and `DEVICE_SECRET` locally.
 2. Browser derives `device_sign_pub` and registers `(DEVICE_ID, device_sign_pub)` with the server.
-3. Browser encrypts `DEVICE_SECRET` under `vault_key` and uploads it to the vault.
-4. The credentials get onto the board by one of the two delivery paths below.
+3. Browser encrypts `DEVICE_SECRET` under `vault_key`, together with the device's name (5.5), and uploads it to the vault.
+4. Provisioning tool writes `DEVICE_ID` + `DEVICE_SECRET` into a **dedicated NVS partition** over Web Serial.
 
-The server never sees the plaintext secret at any point, on either path. Delivery is a usability question, not a cryptographic one — which is exactly why it is allowed to have two answers.
+The server never sees the plaintext secret at any point.
 
-#### 5.3.1 Copy-paste (v1, any hardware)
+Physical USB access is treated as an **intentional security property** and not a limitation because it makes remote provisioning attacks structurally impossible.
 
-The client displays the pair as a ready-to-paste snippet:
+Step 4 is what the whole flow is designed around, and it is worth being clear about what it buys over simply telling the user two strings. The secret never enters the clipboard, never lands in a source file, and never reaches a version control system. It is decoupled from the firmware image, so reflashing preserves it by construction. And because the tool has a channel to the board, it can read back what is already there, which is the only way the check in 5.4 can exist at all. None of that is available to a flow that ends at a text field.
 
-```cpp
-#define SIOT_DEVICE_ID     "zVQ7v3Y5RGuWq0hK1nJv8w"
-#define SIOT_DEVICE_SECRET "9Xk2…"
-```
+The cost is that this path is exactly as portable as its two dependencies: Web Serial is Chromium-only, and the NVS partition scheme is ESP32-specific. That is an accepted narrowing, not an oversight — **one hardware target, done properly, with a published protocol so other targets are possible rather than pre-built.** See 5.3.1 and 6.1.
 
-base64url, decoded by the library at boot — the same encoding used everywhere else, so there is no second format to get wrong. The user pastes it into their sketch and flashes as they normally would.
+#### 5.3.1 Reveal credentials (deliberate escape hatch)
 
-**This is the default path and it works on every board**, not just the ESP32s that happen to have an NVS partition. A protocol published for third-party ports (Section 6.1) is not much of an invitation if the only way to get an identity onto a device is an ESP32-specific flash partition written over a Chromium-only browser API.
+An explicit **Reveal credentials** control on a device shows `DEVICE_ID` and `DEVICE_SECRET` as base64url, decrypted from the vault in the browser. It exists so that someone writing their own client for other hardware has something to provision it with — without it, the published protocol in Section 7 is an invitation with no key attached.
 
-What it costs, stated plainly rather than discovered later:
+This is **not** the normal flow and must not be presented as an equal alternative to it:
 
-- **The secret transits the clipboard and lands in a source file.** Clipboard managers, cloud-synced editor state, and `git` are all exposure the NVS path did not have. Put the two defines in a separate `siot_credentials.h` and gitignore it. That is a mitigation, not a fix; a user who commits the file has published their device's identity.
-- **There is no overwrite protection** (5.4). The browser cannot read back what is already on a board it is not connected to, so nothing structurally prevents provisioning a board twice under two vault records.
-- **The secret lives in the app partition rather than NVS**, so reflashing preserves it only because it is in the source you are reflashing from. It is no longer preserved *by construction*.
+- It is reached by an intentional action on a device that already exists, never offered as a step in setup.
+- It reveals on demand and does not stay revealed.
+- It states its costs at the moment of revealing, not in documentation the user will not read: the secret is now in the clipboard and wherever they put it next; there is no overwrite protection outside the Web Serial path (5.4); and how it is stored on the target hardware is now entirely their problem, including whether it survives a firmware update.
 
-#### 5.3.2 Web Serial to NVS (later, ESP32)
-
-A browser-based tool writes `DEVICE_ID` + `DEVICE_SECRET` into a **dedicated NVS partition** over the Web Serial API. This keeps the secret out of the clipboard and out of source control, decouples it from the firmware image, and enables the overwrite check in 5.4.
-
-It is strictly better where it applies and strictly unavailable where it does not: Web Serial is Chromium-only, and the NVS partition scheme is ESP32-specific. **Deferred to a later phase** — it is an upgrade to a path that already works, not a prerequisite for one.
-
-Physical access is still what stands between an attacker and a provisioned device on both paths, because both end at flashing a board. That was always the real barrier; USB was one expression of it.
+Everything below the credentials — key derivation, AEAD, signing, sequence handling — is identical to the supported path. A third-party client that consumes revealed credentials and conforms to Section 7 is indistinguishable to the server from the reference library, which is the point: the server has no notion of a blessed implementation and gains nothing from one.
 
 ### 5.4 Overwrite protection
 
-**Only available on the Web Serial path (5.3.2).** Before writing, the tool reads back any `DEVICE_ID` already present in NVS:
+Before writing, the tool reads back any `DEVICE_ID` already present in NVS:
 
 - **No ID present** → blank board, provision normally.
 - **ID matches the selected vault record** → re-provisioning the same device, proceed.
 - **ID present but different** → refuse, and surface a clear warning. Overwriting would orphan the existing vault record — the device would keep reporting under an identity nothing in the vault can decrypt anymore, with no way to recover it.
 
-On the copy-paste path this check cannot exist, and pretending otherwise would be worse than not having it. The browser has no channel to the board and no way to distinguish a blank one from a provisioned one. The failure it guards against — a device reporting under an identity the vault has lost track of — is still possible; it is just user discipline in v1 rather than a structural guarantee. The client should say so at the moment it hands over a secret, not bury it in documentation.
+This check requires a channel to the board and therefore does not extend to revealed credentials (5.3.1). Somebody provisioning their own hardware owns that failure mode, and the reveal flow should say so rather than let it be discovered when a device goes quiet.
+
+### 5.5 Device names
+
+Devices are named by their owner — "greenhouse", "front door" — because a list of 128-bit identifiers is unusable the moment there is more than one.
+
+**The name lives in the vault, encrypted under `vault_key`, in the same record as `DEVICE_SECRET`.** It is never sent to the server and there is no `name` column in the `devices` table. This is not a stylistic preference: names are the most directly revealing thing a user will ever type into this system. "Bedroom motion sensor" alongside upload timestamps the server already holds turns accepted metadata leakage (Section 13.1) into an occupancy log with labels on it. A server-side name field would leak more about a household than the encrypted payloads it accompanies.
+
+Consequences that follow and should not be treated as bugs:
+
+- Renaming a device is a vault write and bumps `vault_version` like any other.
+- A locked vault cannot show names. A signed-in but locked client can list `DEVICE_ID`s and liveness (5.6) and nothing else, which is the honest rendering of what it actually knows.
+- Names are not unique and are not identifiers. `DEVICE_ID` is the key everywhere; the name is a label on top of it, and two devices called "sensor" are the user's problem rather than a constraint violation.
+
+### 5.6 Liveness
+
+The device list shows which devices are currently reporting. The signal is derived from records the server already holds, so it costs no new disclosure — the server has always seen upload timing (Section 13.1), and it is precisely that metadata being read back.
+
+**Liveness is a lower bound, and that asymmetry is the useful part.** A device is shown as reporting because a *new, signature-valid record at a higher `seq`* has arrived. The server cannot manufacture one: it would need a signature it cannot produce (Section 7.4, check 1) at a sequence number it cannot reuse (check 2). So the server **cannot make a silent device look alive**.
+
+What it can do is the reverse — withhold records and make a live device look dead. That is the availability limit stated in Section 8 and Section 13, showing up here in a concrete form. It is the safe direction for this failure to point: a false "offline" prompts someone to go and look at the device, while a false "online" would let a server quietly cover for one that has stopped.
+
+Two things follow for the UI:
+
+- **Show when it was last heard from, not just a dot.** "Last reported 4 minutes ago" is a claim the client can substantiate; "online" is a summary of it. Devices report on wildly different schedules and a fixed threshold will call a well-behaved hourly sensor dead.
+- **"Offline" must never be phrased as a fact about the device.** The client knows it has not received a record. Whether that is a flat battery, a dropped WiFi link, or a server declining to serve is not something it can distinguish.
 
 ---
 
@@ -177,24 +195,30 @@ On the copy-paste path this check cannot exist, and pretending otherwise would b
 
 **The provisioning tool does not build, compile, or flash application firmware.** Earlier revisions described the browser decrypting `DEVICE_SECRET`, embedding it into a new firmware build, and reflashing — which is not implementable, because a browser cannot compile C++.
 
-The fix is to stop coupling credentials to *server-side* firmware images at all:
+The fix is to stop coupling credentials to firmware images at all:
 
+- **Credentials live in NVS, firmware lives in the app partition.** They are written independently and at different times.
 - **The user writes and compiles their own sketch** in Arduino IDE or PlatformIO, exactly as they normally would, including the SIoT library. There is no per-device firmware blob stored on the server, no decrypt-and-re-embed step, and nothing the browser has to compile.
-- **The library takes `DEVICE_ID` and `DEVICE_SECRET` from either source** and handles key derivation, AEAD, signing, sequence persistence, and upload internally. The device owner defines readings and actions but never touches crypto.
-  - `SIoT.begin(SIOT_DEVICE_ID, SIOT_DEVICE_SECRET)` — the pasted defines (5.3.1). Portable, and the only option on hardware without an NVS-equivalent.
-  - `SIoT.begin()` — read from the dedicated NVS partition (5.3.2), once that path exists. Preferred on ESP32.
-  - Both decode the same base64url strings into the same 16 and 32 bytes, so the derivation below them is identical and a device can move between the two without a new identity.
-- **Firmware updates preserve `DEVICE_SECRET`**, but by different mechanisms worth keeping straight. On the NVS path it is structural: reflashing the app partition leaves NVS untouched. On the pasted path it is only because the secret is in the source being reflashed — regenerate credentials in the browser without updating the sketch, or reflash from a checkout that lacks `siot_credentials.h`, and the device comes back with no identity or the wrong one.
+- **The library reads `DEVICE_ID` and `DEVICE_SECRET` from NVS** and handles key derivation, AEAD, signing, sequence persistence, and upload internally. `SIoT.begin()` takes no credentials, because on the supported path there are none to pass — the device already has them. The owner defines readings and actions and never touches crypto.
+- **Firmware updates preserve `DEVICE_SECRET` by construction** because reflashing the app partition leaves NVS untouched. There is no regeneration step, no decrypt-and-re-embed step, and no per-device firmware blob stored on the server.
 
 ### 6.1 Portability
 
-The wire protocol (Section 7) is published as a specification — KDF labels, AEAD parameters, nonce construction, payload layout, signature input. The ESP32 library is the reference implementation, not the only permitted one. Anyone can implement a conforming client for other hardware (Raspberry Pi, nRF, STM32) without server changes, because the server only ever verifies a signature and stores an opaque blob.
+**Scope is deliberately one hardware target with a published protocol, rather than several half-supported ones.** The ESP32 library is the reference implementation and the only one shipped. Section 7 is the specification anyone else builds against: KDF labels, AEAD parameters, nonce construction, AAD layout, payload shape, signature input, and the three server checks. Together with the API documentation for `POST /records` and the reveal flow in 5.3.1, that is everything a conforming client needs.
+
+This works because **the server has no concept of a blessed implementation.** It verifies an Ed25519 signature, checks a sequence number, checks a nonce, and stores an opaque blob. A Raspberry Pi, an nRF, an STM32 or a Python script that produces conforming records is accepted on exactly the same terms as the reference library, with no server change and no registration of client type. There is nothing to whitelist because there is nothing being trusted.
+
+What a port has to supply for itself, all of which the ESP32 library handles:
+
+- **Credential storage.** Obtained through 5.3.1; where it lives afterwards is the porter's decision, and the overwrite protection of 5.4 does not extend to it.
+- **A persisted `boot_epoch`** (Section 7.1). This is the one requirement that is not negotiable on any hardware — a client that forgets it repeats a `seq` and reuses a nonce, which is a break, not a bug.
+- **A correct AES-256-GCM and Ed25519**, and the discipline to derive both device keys from `DEVICE_SECRET` with the exact HKDF labels rather than inventing equivalents.
 
 ### 6.2 Consequences worth stating plainly
 
 - **User-authored firmware cannot be hash-verified.** Section 10's verification therefore covers the web client and official library releases only. The extension can tell you the library you pulled is the published one but cannot vouch for the sketch you wrote around it.
-- **On-device storage is plaintext flash unless ESP32 flash encryption is fused.** Anyone with physical possession and a USB cable can read `DEVICE_SECRET` out — from NVS on one path, from the app partition on the other; flash encryption covers both, so the exposure is the same either way. This sits inside the already-accepted physical-access risk, but deployments that care should burn the flash-encryption and secure-boot fuses. Document it as a recommended hardening step and note that it is irreversible.
-- **The pasted path adds an exposure the device never had: the developer's own machine.** `DEVICE_SECRET` passes through the clipboard and comes to rest in a source file, where a synced editor, a backup, or a stray `git add` can carry it somewhere the physical-access assumption does not cover. This is the one respect in which copy-paste is genuinely weaker than writing NVS directly, and it is the reason 5.3.2 is worth building rather than merely nice.
+- **NVS is plaintext flash unless ESP32 flash encryption is fused.** Anyone with physical possession and a USB cable can read `DEVICE_SECRET` out. This sits inside the already-accepted physical-access risk, but deployments that care should burn the flash-encryption and secure-boot fuses. Document it as a recommended hardening step and note that it is irreversible.
+- **Revealing credentials (5.3.1) moves the secret somewhere none of the above covers: the user's own machine.** It passes through the clipboard and comes to rest wherever they put it, where a synced editor, a backup, or a stray `git add` reaches it. Nothing in this document protects it after that point. This is the reason reveal is an escape hatch behind a deliberate action rather than a second supported path — the guarantee genuinely stops there, and a flow that made it look routine would be lying about where the boundary is.
 
 ---
 
@@ -209,7 +233,7 @@ Each device keeps two counters, one of which must survive a power cut:
 - `boot_epoch` (uint32) — **persisted** to non-volatile storage (NVS on ESP32, whatever the port's equivalent is elsewhere), incremented once per boot before any record is produced.
 - `msg_counter` (uint32) — RAM only, reset to zero each boot, incremented per record.
 
-`boot_epoch` is the one piece of state a port cannot do without. Credential delivery is negotiable (Section 5.3); this is not — a device that forgets its `boot_epoch` repeats a `seq`, and repeating a `seq` under a counter-derived nonce is the nonce reuse that Section 7.2 exists to make impossible.
+`boot_epoch` is the one piece of state a port cannot do without (Section 6.1). Storage medium is the porter's choice; forgetting it is not an option — a device that loses its `boot_epoch` repeats a `seq`, and repeating a `seq` under a counter-derived nonce is the nonce reuse that Section 7.2 exists to make impossible.
 
 ```
 seq (uint64) = (boot_epoch << 32) | msg_counter
@@ -262,6 +286,8 @@ Encryption alone does not stop an untrusted server from serving you *stale* or *
 - **AAD binding on everything** (Section 2.3). The server cannot relocate a valid blob into a different slot, swap records between devices, or replay an old vault record into a newer field.
 
 What remains unfixable is that the server can refuse to serve, stall indefinitely, or delete. No cryptographic mechanism recovers data that is simply gone. This is the concrete meaning of *"can withhold, cannot lie undetected"* and the reason availability is listed as accepted residual risk rather than mitigated.
+
+Device liveness (Section 5.6) is the same asymmetry made visible in the UI, and is worth noting here because it is the one place a user reads freshness directly. The server cannot fabricate a newer signed record at a higher `seq`, so it cannot make a dead device look alive; it can withhold and make a live one look dead. Every freshness signal in this system fails in that direction, and none of them should ever be phrased as certainty about the world rather than about what has been received.
 
 ---
 
@@ -377,8 +403,8 @@ Whatever is chosen, the recovery credential must be at least as strong as the pa
 | Weak passwords | User choice, outside the system's control; mitigated by Argon2id and login rate limiting |
 | **Permanent lockout** | No recovery path in v1 because forgetting the password destroys the account (Section 12) |
 | Social engineering | Includes a user approving a malicious update without reading the diff |
-| Physical device access | Accepted tradeoff because provisioning ends at flashing a board either way, which kills remote provisioning attacks. On-device storage is plaintext unless flash encryption is fused |
-| **Credentials on the developer's machine** | Only on the copy-paste path (5.3.1): `DEVICE_SECRET` passes through the clipboard into a source file. Mitigated by a gitignored `siot_credentials.h`, removed entirely by 5.3.2 |
+| Physical device access | Accepted tradeoff because the same USB requirement kills remote provisioning attacks. NVS is plaintext unless flash encryption is fused |
+| **Revealed credentials** | Only if the user deliberately reveals them (5.3.1) to port to other hardware. `DEVICE_SECRET` leaves the vault into the clipboard and whatever they do next is outside this document's guarantees |
 | Memory scraping | Only relevant if the device is already compromised |
 | Unverified web client code | Only a risk if the browser extension is not installed, which is optional and not required for the core crypto guarantees |
 | **Metadata leakage** | Inherent to the architecture and significant for IoT (see below) |
@@ -387,7 +413,7 @@ Whatever is chosen, the recovery credential must be at least as strong as the pa
 
 ### 13.1 Metadata leakage
 
-The server cannot read content but sees the shape of everything: how many devices exist, when each one uploads, how large each record is, which devices hold grants on which others, and when a client fetches what.
+The server cannot read content but sees the shape of everything: how many devices exist, when each one uploads, how large each record is, which devices hold grants on which others, and when a client fetches what. It does **not** see device names (Section 5.5), which is the difference between an unlabelled timing trace and one annotated with what each device is and where it sits.
 
 **For IoT this is not a minor leak.** A motion sensor that uploads only on activity leaks occupancy patterns to a fully passive server without a single byte being decrypted. Upload timing alone can reveal when a house is empty. Encrypting the payload does not hide the fact that a payload existed at 3:47am.
 
@@ -407,7 +433,7 @@ Every purely software-level trust assumption in the server has been eliminated b
 | Backend | Node.js + TypeScript + Fastify |
 | Extension | Vanilla JS, ~100 lines, no build step, no auto-update, optional |
 | Firmware | C++ library, Arduino-compatible; published protocol spec for third-party ports |
-| Provisioning | In-browser, credentials only. v1: copy-paste, any hardware. Later: Web Serial to NVS on ESP32 |
+| Provisioning | Web Serial API (in-browser), writes NVS credentials only. Reveal-credentials escape hatch for third-party ports (5.3.1) |
 | Transport | HTTPS / TLS 1.3, HSTS preload, SPKI pinning on devices |
 | Password KDF | Argon2id (m=64 MiB, t=3, p=1) client-side; Argon2id again server-side on `login_key` |
 | Key derivation | HKDF-SHA256 with domain-separated `info` labels |
@@ -441,8 +467,10 @@ The architecture is settled in shape. These remain genuinely open and should be 
 |---|---|---|
 | Device Ed25519 keypair; public key registered plaintext | 5 | Upload authentication was unspecified; every obvious alternative leaked `DEVICE_SECRET` to the server |
 | `DEVICE_SECRET` split into data key + signing key | 5.1, 9.1 | Grants conveyed forgery capability; read and write are now separable |
-| Provisioning writes credentials only; no firmware building | 6 | The previous update flow required the browser to compile C++ |
-| Copy-paste made the default delivery path; Web Serial deferred | 5.3 | Web Serial is Chromium-only and NVS is ESP32-only, so the one supported path excluded most hardware — which sits badly with publishing the protocol for third-party ports |
+| Provisioning writes NVS credentials only; no firmware building | 6 | The previous update flow required the browser to compile C++ |
+| ESP32 + Web Serial kept as the one supported path; reveal added as an escape hatch | 5.3, 6.1 | Copy-paste was briefly made the default to widen hardware support, and it cost the properties the guided flow exists to provide: no clipboard exposure, no secret in source control, and the overwrite check of 5.4. One target done properly plus a published protocol serves ports better than a second half-supported path |
+| Device names, encrypted in the vault | 5.5 | A list of 128-bit identifiers is unusable past one device; a server-side name field would turn accepted timing metadata into a labelled occupancy log |
+| Device liveness derived from signed records | 5.6, 8 | Users need to know a device has stopped. The server cannot forge a newer signed record, so it can only make a device look *more* offline — the safe direction |
 | Per-device encrypted firmware blob removed | 6 | Obsolete once credentials are decoupled from firmware images |
 | Server stores `Argon2id(login_key)`, not `login_key` | 3 | A database dump was a working login credential for every account |
 | Wrapped random `vault_key` introduced | 2.2 | Password change re-wraps 32 bytes; clean attachment point for future recovery |
