@@ -126,6 +126,11 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   user can take, `--rust` is the mark — the wordmark and the registration ticks — plus work
   being waited on or a vault that cannot be opened. A control that comes out rust is a bug,
   and so is a wordmark that comes out olive.
+- **The plate chrome never carries state.** The four registration ticks and the wordmark look
+  identical on every screen; locked, busy and error are said by the heading and the control,
+  where someone is already looking. Markers that change to signal state were explored and
+  rejected. A stray `.seal` square survived that rejection on the unlock screen and has been
+  removed; anything like it reappearing is the same mistake.
 - **Directory names are `backend/` and `frontend/`**, not the `server/`/`client/` the roadmap
   suggests — the dirs predate the roadmap and renaming buys nothing.
 - **`pg` directly, no ORM.** Raw SQL in `backend/src/`, with a thin `Postgres` wrapper
@@ -137,6 +142,23 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   and overflows a signed bigint. `pg` returns it as a string — parse to `BigInt`, never `Number`.
 - **`vault_version` lives on `users` only**, not duplicated onto `vault_blobs`, so the two
   cannot drift. v1 vault granularity is one blob per user.
+- **The vault version is bound into the blob twice**, in the AAD *and* in the plaintext
+  envelope (`frontend/lib/crypto/vault.js`). The AAD copy means a blob served under a version
+  it was not written at will not open; the plaintext copy means a disagreement between the two
+  is a named error instead of a bare `OperationError`. Neither catches a *consistent* rollback
+  — old blob, honestly labelled — which is what the client's cached high-water mark is for.
+- **`PUT /vault` conflicts are a single-statement compare-and-swap**, not a read-then-write.
+  Two tabs saving at once must not both pass; a `select` followed by an `update` lets them.
+- **Credentials reach a board by copy-paste, not Web Serial** (design 5.3.1). The client shows
+  `DEVICE_ID` and `DEVICE_SECRET` as a pasteable `#define` pair in base64url; the user drops
+  them into their own sketch. Web Serial writing NVS is a later upgrade (5.3.2), not a
+  prerequisite — it is Chromium-only and ESP32-only, and gating provisioning on it contradicted
+  publishing the wire protocol for third-party ports. Cryptographically the two are identical:
+  the server sees exactly the same nothing. What copy-paste actually costs is worth remembering
+  rather than rediscovering — the secret transits the clipboard into a source file (hence
+  `siot_credentials.h`, gitignored), and the overwrite check in 5.4 cannot exist without a
+  channel to the board. Say both in the UI at the moment of handover; do not let them live only
+  in the design doc.
 - **The backend serves `frontend/` statically in dev** (`SERVE_TEST_FRONTEND=true`). This is
   purely so the test console is same-origin — no CORS, and session cookies work unmodified.
   Delete it when the real client exists.
@@ -190,7 +212,7 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
 
 ## Current state
 
-**Phases 0, 1 and 2 complete.** Server boots over HTTPS,
+**Phases 0, 1, 2 and the server half of 3 complete.** Server boots over HTTPS,
 connects to Postgres and Redis, health check reports both and 503s when either is down, schema
 is migrated. The full client key hierarchy of Section 2.1 exists in `frontend/lib/crypto/` —
 Argon2id → master_key → HKDF → `login_key`/`kek`, plus `vault_key` generation and AES-256-GCM
@@ -209,8 +231,14 @@ lifecycle is closed: `requireSession` resolves the cookie and slides the idle wi
 `GET /session` says who you are, and `POST /logout` / `POST /logout-everywhere` revoke one or
 all. `GET /vault-key` returns the sealed 60-byte blob, which the client opens with the `kek` it
 still holds from login — the first response the server hands back that it cannot read itself.
-Routes are `/health`, `/signup`, `/salt`, `/login`, `/session`, `/logout`, `/logout-everywhere`,
-`/vault-key`.
+
+`PUT /vault` and `GET /vault` close Phase 3.1 and the server half of 3.2. The client seals the
+whole vault document under `vault_key` with the version bound into both the AAD and the
+plaintext envelope; the server compare-and-swaps `vault_version` in one statement, so a write
+that does not follow the current version is a 409 and two simultaneous saves cannot both land.
+A never-written vault reads as `{ vault_version: 0, ciphertext: null }` rather than a 404, so
+the client's rollback check has no branch that skips it. Routes are `/health`, `/signup`,
+`/salt`, `/login`, `/session`, `/logout`, `/logout-everywhere`, `/vault-key`, `/vault`.
 
 **Accounts created before the `argon2Input()` fix cannot log in.** Their `login_key_hash` was
 computed over raw bytes rather than the base64 form. Dev data only; sign up again.
@@ -222,7 +250,9 @@ session (the cookie, survives a reload) and is the vault open (`kek` in memory, 
 The pair (session, locked) is where every refresh lands, so `Unlock` is a real screen, not
 a redirect. It never calls `/login`: the password is checked by whether the derived `kek`
 opens the 60-byte blob, entirely client-side, and a wrong guess is a GCM failure the
-server is never told about.
+server is never told about. The React client does **not** read or write the vault document
+yet — that is the rest of Phase 3.2, and it needs the IndexedDB high-water mark and a
+rollback warning someone can act on. Until then the vault round-trip lives in the test console.
 
 The visual language is surveyor's field paper: warm ruled ground, one plate shape with
 registration ticks at its corners, Archivo for everything with Martian Mono held back for
