@@ -393,8 +393,7 @@ a:hover {
    name anyone chose; only the colour is the exception.
 
    The negative margin is worth its ugliness: it pulls the *text* back onto the
-   28px gutter the wordmark sits on, so the two ends of the bar line up and the
-   hover ground is the only thing that overhangs. */
+   28px gutter the wordmark sits on, so the two ends of the bar line up. */
 .account-trigger {
   display: flex;
   align-items: center;
@@ -403,23 +402,13 @@ a:hover {
   margin-right: -8px;
   padding: 0 var(--sp-2);
   background: none;
-  border: 1px solid transparent;
-  border-radius: 0;
+  border: 0;
   color: var(--olive);
   cursor: pointer;
 }
 
 .account-trigger .mono {
   color: inherit;
-}
-
-/* Open looks exactly like hover, so the trigger and the panel below it read as
-   one object rather than a control with a box next to it. */
-.account-trigger:hover,
-.account-trigger[aria-expanded='true'] {
-  background: var(--surface-input);
-  border-color: var(--line-control);
-  color: var(--olive-strong);
 }
 
 /* Drawn from a 2px rule turned through 45 degrees, the same construction as the
@@ -437,15 +426,14 @@ a:hover {
   transform: translateY(1px) rotate(225deg);
 }
 
-/* Flush under the trigger, sharing its bottom border: no gap for the pointer to
-   fall through on the way in. Square, ruled and flat like everything else; the
-   ground is the input white so it separates from the paper without a shadow. */
+/* Flush under the trigger: no gap for the pointer to fall through on the way
+   in. Square, ruled and flat like everything else; the ground is the input
+   white so it separates from the paper without a shadow. */
 .account-menu {
   position: absolute;
   top: 100%;
   right: 0;
   z-index: 10;
-  margin-top: -1px;
   min-width: 100%;
   width: max-content;
   display: flex;
