@@ -8,16 +8,20 @@
 
 import { Type } from '@sinclair/typebox';
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox';
+import { config } from '../config.js';
 import { Base64UrlBytes, decodeBase64Url, encodeBase64Url } from '../lib/base64url.js';
 import { decoySalt } from '../lib/decoy-salt.js';
 import { httpError, isUniqueViolation } from '../lib/http-error.js';
-import { hashLoginKey } from '../lib/login-key.js';
-
-/** Must match the client's `SALT_BYTES` / key sizes — these are wire format. */
-const SALT_BYTES = 16;
-const LOGIN_KEY_BYTES = 32;
-/** iv(12) || ciphertext(32) || tag(16), per `frontend/lib/crypto/vault-key.js`. */
-const WRAPPED_VAULT_KEY_BYTES = 60;
+import { hashLoginKey, verifyAgainstDecoy, verifyLoginKey } from '../lib/login-key.js';
+import {
+  accountThrottle,
+  addressThrottle,
+  checkThrottles,
+  clearThrottle,
+  registerFailure,
+} from '../lib/rate-limit.js';
+import { ABSOLUTE_TTL_SECONDS, SESSION_COOKIE, createSession } from '../lib/session.js';
+import { LOGIN_KEY_BYTES, SALT_BYTES, WRAPPED_VAULT_KEY_BYTES } from '../lib/wire-format.js';
 
 /**
  * ASCII-only, and normalised to lowercase before storage. Restricting the
@@ -41,6 +45,18 @@ const SignupBody = Type.Object(
 );
 
 const SignupResponse = Type.Object({
+  username: Type.String(),
+});
+
+const LoginBody = Type.Object(
+  {
+    username: Username,
+    login_key: Base64UrlBytes(LOGIN_KEY_BYTES, 'HKDF(master_key, "siot/auth/v1")'),
+  },
+  { additionalProperties: false },
+);
+
+const LoginResponse = Type.Object({
   username: Type.String(),
 });
 
@@ -96,6 +112,86 @@ export const authRoutes: FastifyPluginAsyncTypebox = async (app) => {
       // No session. Signup proves you can derive the keys; logging in proves it
       // again through the rate-limited path, and keeps one way in instead of two.
       return reply.code(201).send({ username });
+    },
+  );
+
+  /**
+   * Login (design Section 3). The password is not here and never was — the
+   * client fetched its salt from `/salt`, ran Argon2id locally, and is posting
+   * one HKDF branch of the result. The other branch, `kek`, stayed in the
+   * browser, so a compromised server watching this endpoint still cannot open a
+   * single vault.
+   */
+  app.post(
+    '/login',
+    { schema: { body: LoginBody, response: { 200: LoginResponse } } },
+    async (req, reply) => {
+      const username = req.body.username.toLowerCase();
+
+      // `req.ip` is the socket address: Fastify's `trustProxy` is off, so an
+      // X-Forwarded-For header cannot be used to mint a fresh throttle bucket
+      // per request. Turning it on requires a proxy we actually trust.
+      const throttles = [accountThrottle(username), addressThrottle(req.ip)];
+
+      // Checked before Argon2 runs, so a locked-out attacker cannot keep using
+      // login attempts as a CPU-exhaustion lever.
+      const throttle = await checkThrottles(app.redis, throttles);
+      if (!throttle.allowed) {
+        // Headers set on the reply survive the throw — the error handler sends
+        // through this same reply object.
+        reply.header('retry-after', String(throttle.retryAfterSeconds));
+        throw httpError(
+          429,
+          `too many login attempts, try again in ${throttle.retryAfterSeconds}s`,
+        );
+      }
+
+      const user = await app.pg.queryOne<{ id: string; login_key_hash: string }>(
+        'select id, login_key_hash from users where username = $1',
+        [username],
+      );
+
+      const loginKey = decodeBase64Url(req.body.login_key, LOGIN_KEY_BYTES);
+      let verified: boolean;
+      try {
+        // Both branches run a full Argon2id verify. The decoy path exists purely
+        // so response time cannot distinguish "wrong password" from "no such
+        // account" — see `verifyAgainstDecoy`.
+        verified = user
+          ? await verifyLoginKey(user.login_key_hash, loginKey)
+          : await verifyAgainstDecoy(loginKey);
+      } finally {
+        loginKey.fill(0);
+      }
+
+      if (!user || !verified) {
+        await registerFailure(app.redis, throttles);
+        // One message for both failures. Saying which was wrong would hand back
+        // the account-existence answer the whole flow is built to withhold.
+        throw httpError(401, 'invalid username or password');
+      }
+
+      await clearThrottle(app.redis, throttles[0]);
+
+      const sessionId = await createSession(app.redis, user.id);
+      return reply
+        .setCookie(SESSION_COOKIE, sessionId, {
+          httpOnly: true,
+          // Tracks TLS rather than being hardcoded: with TLS_ENABLED=false the
+          // browser would drop a Secure cookie and login would fail silently.
+          // That mode is already a loud, unsupported debugging hatch where the
+          // login_key crosses the wire in the clear — the flag is not what is
+          // protecting anything there.
+          secure: config.tlsEnabled,
+          sameSite: 'strict',
+          path: '/',
+          // Matches the session's absolute lifetime, so the browser stops
+          // presenting a cookie the server has already stopped honouring.
+          maxAge: ABSOLUTE_TTL_SECONDS,
+        })
+        // A session id in a shared cache would be a very bad day.
+        .header('cache-control', 'no-store')
+        .send({ username });
     },
   );
 

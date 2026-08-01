@@ -1,13 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Fastify from 'fastify';
+import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { config, isDev } from './config.js';
 import { postgresPlugin } from './db/postgres.js';
 import { redisPlugin } from './db/redis.js';
+import { requireSession, sessionPlugin } from './lib/require-session.js';
 import { authRoutes } from './routes/auth.js';
 import { healthRoutes } from './routes/health.js';
+import { sessionRoutes } from './routes/session.js';
+import { vaultRoutes } from './routes/vault.js';
 
 /**
  * Reads the TLS key pair, failing with an actionable message rather than a bare
@@ -68,11 +72,31 @@ export async function buildApp() {
     });
   }
 
+  // Cookie parsing/serialisation only. No `secret`, deliberately: the session
+  // cookie carries a 256-bit random id whose only copy on the server is a hash,
+  // so there is nothing for a signature to add — it would just be a second
+  // secret to leak.
+  await app.register(fastifyCookie);
+
   await app.register(postgresPlugin);
   await app.register(redisPlugin);
 
+  await app.register(sessionPlugin);
+
+  // Public: reachable without a session, by necessity. `/signup` and `/login`
+  // are how you get one, and `/salt` has to answer before authentication is
+  // even possible — its own anti-enumeration design is what covers that.
   await app.register(healthRoutes);
   await app.register(authRoutes);
+
+  // Authenticated: the hook belongs to this scope, so anything registered here
+  // is protected by construction. New routes go inside unless there is a reason
+  // they cannot — that way the easy mistake is a 401, not an open endpoint.
+  await app.register(async (scope) => {
+    scope.addHook('onRequest', requireSession);
+    await scope.register(sessionRoutes);
+    await scope.register(vaultRoutes);
+  });
 
   // Dev-only convenience: serve the plain-HTML test console from the API origin
   // so there is no CORS setup and session cookies will just work. The real
