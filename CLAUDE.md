@@ -60,10 +60,13 @@ Corollaries that are easy to violate by accident:
 ## Layout
 
 ```
-backend/     Fastify + TypeScript API (the main focus of development)
-frontend/    Plain-HTML test console for now; becomes a React+Vite app later
-firmware/    ESP32 sketches — currently a throwaway HTTP button-counter spike
-extension/   Client-verification browser extension (Phase 9, empty)
+backend/       Fastify + TypeScript API (the main focus of development)
+frontend/      One npm package, two clients:
+  app/           the real React + Vite client (Phase 0.4 onwards)
+  index.html     plain-HTML test console — still here, still useful
+  lib/crypto/    client crypto, shared by both and by `node --test`
+firmware/      ESP32 sketches — currently a throwaway HTTP button-counter spike
+extension/     Client-verification browser extension (Phase 9, empty)
 ```
 
 ## Running it
@@ -77,13 +80,22 @@ npm run migrate:up              # apply migrations
 npm run dev                     # https://localhost:3030
 ```
 
-Client crypto is a separate package with its own tests:
+The frontend is one package holding the React client, the test console, and the crypto:
 
 ```bash
 cd frontend
-npm install                     # first time only — hash-wasm
+npm install                     # first time only
 npm test                        # node --test over lib/crypto/
+npm run dev                     # https://localhost:5173 — the real client
 ```
+
+The Vite dev server runs HTTPS off the backend's own certificate and proxies the API
+paths to `:3030`. Both of those are load-bearing, not convenience: the session cookie is
+`Secure; SameSite=Strict`, so a plaintext dev server drops it silently and every
+authenticated request 401s with nothing to show why. `npm run gen-cert` in `backend/`
+has to have run first. Adding a server route means adding it to `API_PATHS` in
+`vite.config.js` too — a missing entry shows up as `index.html` arriving where JSON
+was expected.
 
 Then open <https://localhost:3030/> for the test console, which polls `GET /health`.
 The browser will warn once about the self-signed certificate — that is expected; accept it.
@@ -97,8 +109,22 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
 
 ## Decisions already made (don't relitigate)
 
-- **No npm workspaces.** `backend/` is a standalone package. The frontend has no build step
-  yet. Revisit when the React client lands.
+- **No npm workspaces.** `backend/` is a standalone package, `frontend/` is another. The
+  React client did land, and it did not need workspaces: `vite.config.js` sits at
+  `frontend/` with `root: 'app'`, so one `package.json` covers the app, the test console
+  and the crypto tests.
+- **The test console stays.** It is not superseded by `frontend/app/`. It exercises
+  `lib/crypto/` directly with no React in the way, which is what you want when the
+  question is whether a derivation is correct rather than whether a screen renders.
+- **Hand-rolled router, ~40 lines** (`app/src/lib/router.jsx`), not React Router. There
+  are four screens and no nested routes, params, or loaders to justify the dependency.
+- **Fonts are self-hosted** via `@fontsource`, never Google Fonts. A zero-knowledge
+  product that phones a third party on every page load is telling on its users for the
+  sake of a stylesheet.
+- **Design tokens are the whole palette** (`app/src/styles/tokens.css`); screens never
+  hardcode a colour. The two accents are not interchangeable: `--olive` is the brand and
+  every action the user can take, `--rust` is the datum mark and the colour of work being
+  waited on or a vault that cannot be opened. A control that comes out rust is a bug.
 - **Directory names are `backend/` and `frontend/`**, not the `server/`/`client/` the roadmap
   suggests — the dirs predate the roadmap and renaming buys nothing.
 - **`pg` directly, no ORM.** Raw SQL in `backend/src/`, with a thin `Postgres` wrapper
@@ -119,8 +145,10 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   a supported mode. There is no plaintext listener and no HTTP→HTTPS redirect.
 - **Client crypto lives in `frontend/lib/crypto/`, never in `backend/`.** Physical separation
   is weaker than a cryptographic guarantee, but it means "just derive the kek server-side"
-  cannot be written without an obviously wrong import path. `frontend/` is now its own npm
-  package (still no build step) purely so it can have `hash-wasm` and a test runner.
+  cannot be written without an obviously wrong import path. It stays *outside* `app/` too,
+  reached by the single `@siot/crypto` alias in `vite.config.js` rather than copied in, so
+  the modules `node --test` covers are byte-identical to the ones the browser loads.
+  There is no bundler-only second copy that could drift.
 - **Tests are `node --test`, no framework.** Node's Web Crypto is the same API the browser
   exposes, so the tests run the exact ESM modules the client loads — no jsdom, no mocks, no
   transpile. Same reason the browser gets an import map for `hash-wasm` instead of a bundle:
@@ -186,9 +214,24 @@ Routes are `/health`, `/signup`, `/salt`, `/login`, `/session`, `/logout`, `/log
 **Accounts created before the `argon2Input()` fix cannot log in.** Their `login_key_hash` was
 computed over raw bytes rather than the base64 form. Dev data only; sign up again.
 
+**Phase 0.4 is now done too, out of order.** `frontend/app/` is a real React + Vite client
+with four screens — sign in, sign up, unlock, devices — talking to the seven endpoints
+above. Which screen shows is decided by two independent facts rather than one: is there a
+session (the cookie, survives a reload) and is the vault open (`kek` in memory, does not).
+The pair (session, locked) is where every refresh lands, so `Unlock` is a real screen, not
+a redirect. It never calls `/login`: the password is checked by whether the derived `kek`
+opens the 60-byte blob, entirely client-side, and a wrong guess is a GCM failure the
+server is never told about.
+
+The visual language is surveyor's field paper: warm ruled ground, one plate shape with
+registration ticks at its corners, Archivo for everything with Martian Mono held back for
+values the machine owns rather than the person. Argon2id's ~1s gets an honest label and an
+indeterminate bar, never a spinner or a fake percentage — the wait is the security
+property working.
+
 `backend/` has no test harness. Everything so far was verified by hand against a running
-server; the frontend's `node --test` suite covers `lib/crypto/` only. Phase 2.5 onwards is
-where that stops being tenable.
+server; the frontend's `node --test` suite covers `lib/crypto/` only, and nothing covers
+the React screens. Phase 2.5 onwards is where that stops being tenable.
 
 `firmware/esp32/esp32.ino` is the old unencrypted spike and **no longer works against this
 server** — its `POST /button` endpoint is gone and the server is HTTPS-only. That is intended;
@@ -196,4 +239,4 @@ it gets replaced wholesale by the SIoT library in Phase 5.
 
 Next up is Phase 3 — vault storage: `PUT /vault` / `GET /vault`, version-based conflict and
 rollback detection, then the password change flow. The client already holds an unwrapped
-`vault_key` after login, so 3.1 has everything it needs.
+`vault_key` after login and after unlock, so 3.1 has everything it needs on both paths.
