@@ -287,6 +287,16 @@ Encryption alone does not stop an untrusted server from serving you *stale* or *
 
 What remains unfixable is that the server can refuse to serve, stall indefinitely, or delete. No cryptographic mechanism recovers data that is simply gone. This is the concrete meaning of *"can withhold, cannot lie undetected"* and the reason availability is listed as accepted residual risk rather than mitigated.
 
+> **Acknowledged gap: a caught rollback has no client-side resolution path.** The client-side
+> implementation (`Devices.jsx`, roadmap 3.2) surfaces the warning this section calls for, but
+> the warning clears only if the server later serves a version at or above the cached
+> high-water mark; that is the one thing the current code checks for. If the newer data is
+> genuinely gone (a restored backup, an attacker with nothing newer to serve), there is no
+> escape hatch: no way for a person to inspect the situation and deliberately accept the older
+> version, the way credential reveal (5.3.1) is a deliberate, friction-heavy way past a
+> different boundary. Building one is future scope, not part of 3.2, and is listed as an open
+> question in Section 15.
+
 Device liveness (Section 5.6) is the same asymmetry made visible in the UI, and is worth noting here because it is the one place a user reads freshness directly. The server cannot fabricate a newer signed record at a higher `seq`, so it cannot make a dead device look alive; it can withhold and make a live one look dead. Every freshness signal in this system fails in that direction, and none of them should ever be phrased as certainty about the world rather than about what has been received.
 
 ---
@@ -458,6 +468,7 @@ The architecture is settled in shape. These remain genuinely open and should be 
 4. **Account recovery** (Section 12) — whether any mechanism can meet the bar of being no weaker than the password.
 5. **Metadata mitigation** (Section 13.1) — whether any device class warrants padded fixed-interval uploads in v1.
 6. **Vault record granularity** — one blob versus per-record encryption, affecting sync cost and how precisely `vault_version` rollback can be detected.
+7. **Rollback resolution path** (Section 8) — a caught rollback currently has no way past it short of the server serving a newer version again. Whether a deliberate, friction-heavy "accept this older version anyway" control belongs in the client, and if so what it should cost the person choosing it.
 
 ---
 
