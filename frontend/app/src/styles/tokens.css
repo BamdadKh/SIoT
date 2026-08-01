@@ -52,11 +52,13 @@
   --font-sans: 'Archivo Variable', system-ui, sans-serif;
   --font-mono: 'Martian Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
-  /* Archivo is variable on the width axis. Headings run wide, buttons slightly
-     less so, the wordmark widest — set through font-variation-settings. */
-  --wdth-word: 118;
-  --wdth-head: 110;
-  --wdth-control: 108;
+  /* Archivo is variable on both weight and width. The width axis is what gives
+     the headings their character, so it is a token rather than a one-off.
+     Expressed as font-stretch percentages: the face declares a 62%-125% range,
+     and the high-level property is the one that inherits cleanly. */
+  --wdth-word: 118%;
+  --wdth-head: 110%;
+  --wdth-control: 108%;
 
   --size-h1: 32px;
   --size-h2: 30px;

@@ -53,7 +53,7 @@ a:hover {
 
 .wordmark {
   font-family: var(--font-sans);
-  font-variation-settings: 'wdth' var(--wdth-word);
+  font-stretch: var(--wdth-word);
   font-weight: 700;
   font-size: 17px;
   letter-spacing: 0.1em;
@@ -64,7 +64,7 @@ a:hover {
 .h2,
 .h3 {
   font-family: var(--font-sans);
-  font-variation-settings: 'wdth' var(--wdth-head);
+  font-stretch: var(--wdth-head);
   font-weight: 700;
   letter-spacing: -0.025em;
   margin: 0;
@@ -236,7 +236,7 @@ a:hover {
   background: var(--olive);
   color: var(--on-olive);
   font-family: var(--font-sans);
-  font-variation-settings: 'wdth' var(--wdth-control);
+  font-stretch: var(--wdth-control);
   font-weight: 700;
   font-size: var(--size-control);
   cursor: pointer;
@@ -258,7 +258,7 @@ a:hover {
   background: var(--surface-input);
   border: 1px solid var(--line-control);
   color: var(--ink);
-  font-variation-settings: 'wdth' 100;
+  font-stretch: 100%;
   font-weight: 500;
   font-size: var(--size-small);
 }
@@ -276,7 +276,7 @@ a:hover {
   border: 0;
   color: var(--olive);
   font-family: var(--font-sans);
-  font-variation-settings: 'wdth' 100;
+  font-stretch: 100%;
   font-weight: 600;
   font-size: var(--size-small);
   cursor: pointer;
