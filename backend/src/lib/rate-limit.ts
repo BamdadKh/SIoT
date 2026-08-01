@@ -7,8 +7,8 @@
  *
  * Two independent scopes, because they stop different attacks:
  *
- * - **account** — one name, many passwords. This is the guessing attack.
- * - **address** — one source, many names. This is the credential-stuffing sweep
+ * - **account**: one name, many passwords. This is the guessing attack.
+ * - **address**: one source, many names. This is the credential-stuffing sweep
  *   that never trips a per-account limit because it only tries each name once.
  *
  * Either scope being locked rejects the request. Account locking is a denial of

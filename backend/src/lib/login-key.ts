@@ -17,7 +17,7 @@ import { hash, verify, Algorithm } from '@node-rs/argon2';
 import { randomBytes } from 'node:crypto';
 
 /**
- * Deliberately lighter than the client's m=64 MiB, t=3 — and that is not a
+ * Deliberately lighter than the client's m=64 MiB, t=3 because that is not a
  * weakening. The client hashes a low-entropy human password, where the KDF cost
  * *is* the security margin. Here the input is already a 256-bit HKDF output, so
  * brute-forcing the hash is infeasible regardless of cost; the work factor only

@@ -1,4 +1,4 @@
-# SIOT — Design Document
+# SIoT Design Document
 
 *"The S in IoT stands for security"*
 
@@ -9,11 +9,11 @@ Last updated: July 31, 2026
 
 ## 1. Vision & Core Principle
 
-SIOT is a zero-knowledge IoT security platform. The server is **fully untrusted by design** — it functions purely as a dumb encrypted storage layer. At no point does it have access to plaintext device secrets, user data, or decryption keys.
+SIoT is a zero-knowledge IoT security platform. The server is **fully untrusted by design** and functions purely as a dumb encrypted storage layer. At no point does it have access to plaintext device secrets, user data, or decryption keys.
 
-This is treated as a non-negotiable constraint: every architectural decision is evaluated against a single question — *does this give the server plaintext access to anything, even indirectly?*
+This is treated as a non-negotiable constraint. Every architectural decision is evaluated against one question: does this give the server plaintext access to anything, even indirectly?
 
-One clarification on what "untrusted" can and cannot buy us. Cryptography can stop the server from **reading** or **silently altering** anything. It cannot stop the server from **withholding** — refusing to serve data, stalling, or deleting records. The guarantee this design targets is precise:
+One clarification on what "untrusted" can and cannot buy us. Cryptography can stop the server from **reading** or **silently altering** anything. It cannot stop the server from **withholding** data by refusing to serve it, stalling, or deleting records. The guarantee this design targets is precise:
 
 > **The server can withhold, but it cannot lie undetected.**
 
@@ -54,9 +54,9 @@ Device keys are unaffected by password changes, since they live inside the vault
 
 ### 2.3 Symmetric primitives
 
-- **AEAD: AES-256-GCM** everywhere. Chosen because it is the only authenticated cipher available in both Web Crypto and ESP32 hardware acceleration — XChaCha20-Poly1305 would be a better fit for random nonces but has no Web Crypto support, and shipping a JS implementation to handle the user's keys is a worse trade than managing nonces carefully.
-- **Nonces are never random on the device.** GCM nonce reuse under a fixed key is catastrophic (it leaks the authentication key, not just the plaintext), and an ESP32 immediately after boot is a bad place to trust an RNG. The counter construction in Section 7.2 makes reuse structurally impossible instead of probabilistically unlikely.
-- **All ciphertext binds its context as AAD.** Every record commits to who it belongs to, which device produced it, what kind of record it is, and where it sits in sequence. Without this the server cannot forge a record, but it *can* move a valid one into a different slot — swap a device's readings into another device's history, or replay an old vault record into a newer field. AAD binding closes that.
+- **AEAD: AES-256-GCM** everywhere. Chosen because it is the only authenticated cipher available in both Web Crypto and ESP32 hardware acceleration. XChaCha20-Poly1305 would be a better fit for random nonces but has no Web Crypto support, and shipping a JS implementation to handle the user's keys is a worse trade than managing nonces carefully.
+- **Nonces are never random on the device.** GCM nonce reuse under a fixed key is catastrophic because it leaks the authentication key, not just the plaintext. An ESP32 immediately after boot is a bad place to trust an RNG. The counter construction in Section 7.2 makes reuse structurally impossible instead of probabilistically unlikely.
+- **All ciphertext binds its context as AAD.** Every record commits to who it belongs to, which device produced it, what kind of record it is, and where it sits in sequence. Without this the server cannot forge a record, but it can move a valid one into a different slot: swap a device's readings into another device's history or replay an old vault record into a newer field. AAD binding closes that hole.
 
 ---
 
@@ -65,14 +65,14 @@ Device keys are unaffected by password changes, since they live inside the vault
 - Client submits `login_key` to the server over TLS.
 - **The server does not store `login_key`. It stores `Argon2id(login_key, server_salt)`** and compares in constant time.
 
-That second, server-side hash matters: without it a database dump is not just a pile of sealed vaults, it is a working login credential for every account. The vault would stay sealed either way, but the attacker would be authenticated — able to read metadata, delete records, or register devices. The client-side KDF protects the *vault*; the server-side KDF protects *authentication*. They defend different things and you need both.
+That second server-side hash matters because without it a database dump is not just a pile of sealed vaults but a working login credential for every account. The vault would stay sealed either way, but the attacker would be authenticated and able to read metadata, delete records, or register devices. The client-side KDF protects the vault while the server-side KDF protects authentication. They defend different things and you need both.
 
 - On match, the server creates a **server-side session** in Redis and returns a session identifier.
-  - Session IDs are 256-bit CSPRNG, **stored hashed** in Redis (a Redis dump shouldn't hand over live sessions), with an absolute TTL and an idle timeout.
+  - Session IDs are 256-bit CSPRNG stored hashed in Redis so a Redis dump won't hand over live sessions. They have an absolute TTL and an idle timeout.
   - Delivered as a cookie with `HttpOnly; Secure; SameSite=Strict`.
-- Revocation is cheap and immediate — logout, logout-everywhere, or suspected compromise is just deleting the corresponding Redis entry (or all entries tied to a user). No blocklist workaround needed, unlike stateless tokens.
+- Revocation is cheap and immediate because logout, logout-everywhere, or suspected compromise just deletes the corresponding Redis entry or all entries tied to a user. No blocklist workaround is needed, unlike with stateless tokens.
 - **Login is rate-limited** per account and per source address, with exponential backoff. Zero-knowledge architecture does nothing to slow down online password guessing; that has to be enforced server-side.
-- **Salt lookup must not leak account existence.** The salt is fetched by username before authentication, so an unknown username has to return something. Return a deterministic decoy — `HMAC(server_secret, username)` — so the response is indistinguishable from a real account's and stable across retries.
+- **Salt lookup must not leak account existence.** The salt is fetched by username before authentication, so an unknown username has to return something. Return a deterministic decoy using `HMAC(server_secret, username)` so the response is indistinguishable from a real account's and stable across retries.
 
 No zero-knowledge proof is required at the login step itself. A standard hash comparison plus session issuance is sufficient because the password never transmits and the server never learns `kek`.
 
@@ -84,14 +84,14 @@ No zero-knowledge proof is required at the login step itself. A standard hash co
 
 Zero-knowledge does not make the wire safe, and TLS was missing from earlier revisions of this document. It is mandatory:
 
-- **HTTPS everywhere, TLS 1.3, HSTS with preload.** Plain HTTP is disallowed, including on the local network — "it's just my LAN" is exactly how the device-registration attack below succeeds.
+- **HTTPS everywhere, TLS 1.3, HSTS with preload.** Plain HTTP is disallowed, including on the local network because "it's just my LAN" is exactly how the device-registration attack below succeeds.
 - Three things break without it, none of which the crypto core protects:
   - `login_key` is password-equivalent in transit.
   - Session IDs are bearer tokens.
-  - **Device public-key registration needs integrity at write time.** An active attacker who can rewrite that request substitutes their own public key and can then forge readings for the device forever. Confidentiality is irrelevant here; this is purely an integrity problem, and TLS is what solves it.
+  - **Device public-key registration needs integrity at write time.** An active attacker who can rewrite that request substitutes their own public key and can then forge readings for the device forever. Confidentiality is irrelevant here because this is purely an integrity problem, and TLS is what solves it.
 - **Devices pin the server's SPKI** (not the leaf certificate) in the library configuration.
 
-> **Open item — certificate rotation.** Pinned firmware plus an expiring certificate is a fleet-bricking event, and devices may be physically inaccessible. Pinning the SPKI rather than the certificate means routine renewals are safe as long as the key pair is reused, but a key rotation still requires a plan. Options: pin a long-lived intermediate, ship a backup pin alongside the primary, or accept re-provisioning over USB. Not yet decided (Section 15).
+> **Open item: certificate rotation.** Pinned firmware plus an expiring certificate is a fleet-bricking event, and devices may be physically inaccessible. Pinning the SPKI rather than the certificate means routine renewals are safe as long as the key pair is reused, but a key rotation still requires a plan. Options: pin a long-lived intermediate, ship a backup pin alongside the primary, or accept re-provisioning over USB. Not yet decided (Section 15).
 
 ---
 
@@ -109,7 +109,7 @@ DEVICE_SECRET (random 32B, browser CSPRNG)
   └─ HKDF-SHA256(info="siot/device/sign/v1") ──> ed25519_seed (32B) ──> device_sign_priv / device_sign_pub
 ```
 
-The split is what makes read-only grants possible (Section 9). `device_data_key` is shareable and confers **read** access; `device_sign_priv` never leaves the device and confers **write** authority. A single symmetric key could not separate the two.
+The split is what makes read-only grants possible (Section 9). `device_data_key` is shareable and confers **read** access while `device_sign_priv` never leaves the device and confers **write** authority. A single symmetric key could not separate the two.
 
 ### 5.2 What the server learns
 
@@ -119,7 +119,7 @@ The split is what makes read-only grants possible (Section 9). `device_data_key`
 | `device_sign_pub` | **Plaintext** | Verifying upload signatures — it's a public key, publishing it leaks nothing |
 | `DEVICE_SECRET` | Encrypted in vault | Everything else; server never sees it |
 
-`device_sign_pub` in plaintext is what lets an untrusted server authenticate device uploads without holding anything secret. This closes a gap in earlier revisions, where nothing specified how the server distinguished a genuine upload from an attacker POSTing garbage to a known `DEVICE_ID` — and where every obvious answer (device presents `DEVICE_SECRET`) handed the server the secret and collapsed the core guarantee.
+`device_sign_pub` in plaintext is what lets an untrusted server authenticate device uploads without holding anything secret. This closes a gap in earlier revisions where nothing specified how the server distinguished a genuine upload from an attacker POSTing garbage to a known `DEVICE_ID`. Every obvious answer (like having the device present `DEVICE_SECRET`) handed the server the secret and collapsed the core guarantee.
 
 `DEVICE_ID` is generated with 128 bits of entropy, so accidental collision is negligible; the server additionally enforces uniqueness as a hard constraint, which it can do trivially without seeing anything sensitive.
 
@@ -132,7 +132,7 @@ The split is what makes read-only grants possible (Section 9). `device_data_key`
 
 The server never sees the plaintext secret at any point.
 
-Physical USB access is treated as an **intentional security property**, not a limitation — it is what makes remote provisioning attacks structurally impossible.
+Physical USB access is treated as an **intentional security property** and not a limitation because it makes remote provisioning attacks structurally impossible.
 
 ### 5.4 Overwrite protection
 
@@ -151,9 +151,9 @@ Before writing, the tool reads back any `DEVICE_ID` already present in NVS:
 The fix is to stop coupling credentials to firmware images at all:
 
 - **Credentials live in NVS, firmware lives in the app partition.** They are written independently and at different times.
-- **The user writes and compiles their own sketch** in Arduino IDE or PlatformIO, exactly as they normally would, including the SIOT library.
-- **The library reads `DEVICE_ID` / `DEVICE_SECRET` from NVS** and handles key derivation, AEAD, signing, sequence persistence, and upload internally. The device owner defines readings and actions; they never touch crypto.
-- **Firmware updates preserve `DEVICE_SECRET` by construction.** Reflashing the app partition leaves NVS untouched. There is no regeneration step, no decrypt-and-re-embed step, and no per-device firmware blob stored on the server.
+- **The user writes and compiles their own sketch** in Arduino IDE or PlatformIO, exactly as they normally would, including the SIoT library.
+- **The library reads `DEVICE_ID` and `DEVICE_SECRET` from NVS** and handles key derivation, AEAD, signing, sequence persistence, and upload internally. The device owner defines readings and actions but never touches crypto.
+- **Firmware updates preserve `DEVICE_SECRET` by construction** because reflashing the app partition leaves NVS untouched. There is no regeneration step, no decrypt-and-re-embed step, and no per-device firmware blob stored on the server.
 
 ### 6.1 Portability
 
@@ -161,8 +161,8 @@ The wire protocol (Section 7) is published as a specification — KDF labels, AE
 
 ### 6.2 Consequences worth stating plainly
 
-- **User-authored firmware cannot be hash-verified.** Section 10's verification therefore covers the web client and official library releases only. The extension can tell you the library you pulled is the published one; it cannot vouch for the sketch you wrote around it.
-- **NVS is plaintext flash unless ESP32 flash encryption is fused.** Anyone with physical possession and a USB cable can read `DEVICE_SECRET` out. This sits inside the already-accepted physical-access risk, but deployments that care should burn the flash-encryption and secure-boot fuses. Document it as a recommended hardening step; note that it is irreversible.
+- **User-authored firmware cannot be hash-verified.** Section 10's verification therefore covers the web client and official library releases only. The extension can tell you the library you pulled is the published one but cannot vouch for the sketch you wrote around it.
+- **NVS is plaintext flash unless ESP32 flash encryption is fused.** Anyone with physical possession and a USB cable can read `DEVICE_SECRET` out. This sits inside the already-accepted physical-access risk, but deployments that care should burn the flash-encryption and secure-boot fuses. Document it as a recommended hardening step and note that it is irreversible.
 
 ---
 
@@ -183,7 +183,7 @@ seq (uint64) = (boot_epoch << 32) | msg_counter
 
 `seq` is strictly increasing across reboots and power loss without requiring an RTC, network time, or a trustworthy RNG at startup.
 
-Readers verify **strict monotonicity, not contiguity**. A reboot advances the high word and zeroes the low word, producing a large legitimate jump. That jump is distinguishable from tampering: gaps within a single `boot_epoch` indicate dropped or withheld records, whereas a `boot_epoch` increment is a normal restart.
+Readers verify **strict monotonicity, not contiguity**. A reboot advances the high word and zeroes the low word, producing a large legitimate jump. That jump is distinguishable from tampering because gaps within a single `boot_epoch` indicate dropped or withheld records, whereas a `boot_epoch` increment is a normal restart.
 
 ### 7.2 Nonce construction
 
@@ -191,7 +191,7 @@ Readers verify **strict monotonicity, not contiguity**. A reboot advances the hi
 nonce (12B) = 0x00000000 || seq (8B, big-endian)
 ```
 
-Since `seq` is strictly increasing and `device_data_key` is fixed for the life of the secret, **nonce reuse cannot occur**. No RNG quality assumption, no birthday-bound budgeting, no state to reconcile after an unclean shutdown — the counter is persisted before use, so the worst case after power loss is a skipped `seq`, never a repeated one.
+Since `seq` is strictly increasing and `device_data_key` is fixed for the life of the secret, **nonce reuse cannot occur**. No RNG quality assumption, no birthday-bound budgeting, and no state to reconcile after an unclean shutdown is needed because the counter is persisted before use. The worst case after power loss is a skipped `seq`, never a repeated one.
 
 ### 7.3 Record format
 
@@ -227,13 +227,13 @@ Encryption alone does not stop an untrusted server from serving you *stale* or *
 - **Strictly increasing `seq` on device records** (Section 7.1). Withheld or reordered readings leave a detectable hole in the sequence.
 - **AAD binding on everything** (Section 2.3). The server cannot relocate a valid blob into a different slot, swap records between devices, or replay an old vault record into a newer field.
 
-What remains unfixable: the server can refuse to serve, stall indefinitely, or delete. No cryptographic mechanism recovers data that is simply gone. This is the concrete meaning of *"can withhold, cannot lie undetected"* — and the reason availability is listed as accepted residual risk rather than mitigated.
+What remains unfixable is that the server can refuse to serve, stall indefinitely, or delete. No cryptographic mechanism recovers data that is simply gone. This is the concrete meaning of *"can withhold, cannot lie undetected"* and the reason availability is listed as accepted residual risk rather than mitigated.
 
 ---
 
 ## 9. Inter-Device Automations (Read-Only Key Grants)
 
-- Client decrypts `device_B_data_key` from the vault, re-encrypts it under `device_A_data_key`, and uploads the result as a **key grant**:
+- Client decrypts `device_B_data_key` from the vault, re-encrypts it under `device_A_data_key`, and uploads the result as a key grant:
 
 ```
 grant = AES-256-GCM(device_A_data_key, nonce, device_B_data_key,
@@ -248,7 +248,7 @@ grant = AES-256-GCM(device_A_data_key, nonce, device_B_data_key,
 
 **Only `device_data_key` is shared. `device_sign_priv` never leaves Device B.**
 
-This is why the key split in Section 5.1 exists. Under the earlier single-symmetric-key design, granting A the ability to *read* B necessarily also granted it the ability to *write as* B — anyone holding the key could encrypt convincing readings and attribute them to B. A compromised temperature sensor could have fabricated the smoke detector's output.
+This is why the key split in Section 5.1 exists. Under the earlier single-symmetric-key design, granting A the ability to read B necessarily also granted it the ability to write as B because anyone holding the key could encrypt convincing readings and attribute them to B. A compromised temperature sensor could have fabricated the smoke detector's output.
 
 Now the capabilities are cleanly separated:
 
@@ -262,11 +262,11 @@ A reader can always check authenticity, because `device_sign_pub` is public. A r
 
 ### 9.2 Scope: historical as well as live
 
-Once Device A holds `device_B_data_key`, it isn't limited to a live feed from B — it can query the server for B's already-uploaded records and decrypt them locally. **A grant extends read access to everything B has stored, past and future.** That is a deliberate capability, but it should be presented to the user as such at grant time, not buried: this is not "let A see what B is doing now."
+Once Device A holds `device_B_data_key`, it is not limited to a live feed from B because it can query the server for B's already-uploaded records and decrypt them locally. **A grant extends read access to everything B has stored, past and future.** That is a deliberate capability, but it should be presented to the user as such at grant time, not buried. This is not just "let A see what B is doing now."
 
 ### 9.3 Revocation is rotation
 
-**Grants cannot be revoked for data already encrypted under the shared key.** A holds the key; that is irreversible. Revocation means rotating B's `DEVICE_SECRET`, which requires **physical re-provisioning over USB** (Section 5.3), and only protects data produced after the rotation. All of B's history remains readable by A forever.
+**Grants cannot be revoked for data already encrypted under the shared key** because A holds the key and that is irreversible. Revocation means rotating B's `DEVICE_SECRET`, which requires physical re-provisioning over USB (Section 5.3) and only protects data produced after the rotation. All of B's history remains readable by A forever.
 
 This must be surfaced in the UI before a grant is created. A user who believes "revoke" means "A can no longer read B" will be wrong in a way that matters.
 
@@ -276,18 +276,18 @@ This must be surfaced in the UI before a grant is created. A user who believes "
 
 A minimal, deliberately non-updating browser extension (~100 lines, open source) is the trust anchor for the code the user runs. **The extension is optional.**
 
-- **On install:** no stored hash exists → forced code review → user approves → hash stored locally.
-- **On update:** hash mismatch detected → extension fetches raw code from GitHub → computes its own hash (never trusts a claimed hash) → shows a diff → user approves.
+- **On install:** no stored hash exists, so the extension forces code review, the user approves, and the hash is stored locally.
+- **On update:** when a hash mismatch is detected, the extension fetches raw code from GitHub, computes its own hash (never trusting a claimed hash), shows a diff, and waits for user approval.
 - Applies to site code, official library releases, and custom widget plugins (Section 11).
 
-Being optional matters for the threat model: the core zero-knowledge guarantees hold with or without the extension, because they are enforced by cryptography, not by the extension. What it adds is protection against a *separate* threat — a compromised server serving altered JavaScript to the browser, a standard web supply-chain attack. Without it, unverified web client code is part of the residual attack surface (Section 13).
+Being optional matters for the threat model because the core zero-knowledge guarantees hold with or without the extension since they are enforced by cryptography, not by the extension. What it adds is protection against a separate threat: a compromised server serving altered JavaScript to the browser, a standard web supply-chain attack. Without it, unverified web client code is part of the residual attack surface (Section 13).
 
 ### 10.1 Feasibility constraints
 
 Two things need resolving before this ships, and neither is a detail:
 
-- **Manifest V3 removed blocking `webRequest`.** An extension can no longer reliably intercept and *block* a script before the page executes it. Verification may therefore be after-the-fact — a warning once malicious code has already run, which is a materially weaker guarantee. Likely mitigation: pair the extension with a strict CSP and Subresource Integrity so the *browser* enforces what the extension merely audits, and pin the SRI manifest rather than individual bundles.
-- **"No auto-update" conflicts with the Chrome Web Store**, which updates extensions silently. Honoring the no-auto-update property requires self-hosting or unpacked developer-mode installation, both of which hurt adoption enough to affect whether anyone actually runs the extension.
+- **Manifest V3 removed blocking `webRequest`.** An extension can no longer reliably intercept and block a script before the page executes it. Verification may therefore be after-the-fact: a warning once malicious code has already run, which is a materially weaker guarantee. Likely mitigation is to pair the extension with a strict CSP and Subresource Integrity so the browser enforces what the extension merely audits, and pin the SRI manifest rather than individual bundles.
+- **"No auto-update" conflicts with the Chrome Web Store** because it updates extensions silently. Honoring the no-auto-update property requires self-hosting or unpacked developer-mode installation, both of which hurt adoption enough to affect whether anyone actually runs the extension.
 
 A hash-pinning extension that verifies only the entry HTML while a hashed SPA bundle loads separately would be checking the wrong thing entirely. Whatever ships must cover every executed subresource.
 
@@ -306,22 +306,22 @@ A schema drives UI rendering, and schemas can arrive from granted devices belong
 
 ### 11.2 Widget plugins need a sandbox
 
-Custom widget plugins are arbitrary third-party JavaScript running inside the client that holds decrypted keys. Hash-pinning tells you *which* code is running; it does not constrain what that code can do once approved, and the extension is optional anyway.
+Custom widget plugins are arbitrary third-party JavaScript running inside the client that holds decrypted keys. Hash-pinning tells you which code is running but does not constrain what that code can do once approved, and the extension is optional anyway.
 
-Plugins must run in a **sandboxed iframe or Worker, communicating only over `postMessage`, and must never receive key material or raw vault access.** The host passes in already-decrypted display values and receives back rendering instructions. A plugin should be incapable of exfiltrating a key even if the user approved it while it was malicious.
+Plugins must run in a sandboxed iframe or Worker and communicate only over `postMessage`. They must never receive key material or raw vault access. The host passes in already-decrypted display values and receives back rendering instructions. A plugin should be incapable of exfiltrating a key even if the user approved it while it was malicious.
 
 ---
 
 ## 12. Account Recovery — Open Question
 
-**There is no account recovery in v1. If you forget your password, the account and all its data are permanently lost.**
+**There is no account recovery in v1.** If you forget your password, the account and all its data are permanently lost.
 
-This is stated bluntly because it needs to be stated bluntly, in the UI as well as here.
+This must be stated bluntly because it needs to be stated bluntly, in the UI as well as here.
 
-The previously specified mechanism — five security questions, normalized and concatenated into a KDF producing a key that wraps `master_key` — has been removed. Two reasons, and the first is the serious one:
+The previously specified mechanism using five security questions, normalized and concatenated into a KDF producing a key that wraps `master_key`, has been removed. Two reasons exist, and the first is the serious one:
 
-- **The recovery blob was an offline brute-force oracle.** It sits on the server, and security answers carry far less entropy than a password. Anyone who dumped the database could grind the answer space offline and recover the vault key. That reduces every account's security to `min(password strength, answer strength)` — so the recovery path, intended as a safety net, would have quietly become the cheapest way in. Adding a recovery mechanism that is weaker than the primary credential does not add a fallback; it *replaces* the primary credential from the attacker's point of view.
-- **Concatenating all five answers made it all-or-nothing.** Forget one of five and recovery fails completely — a high lockout risk for something whose entire purpose is preventing lockout.
+- **The recovery blob was an offline brute-force oracle.** It sits on the server and security answers carry far less entropy than a password. Anyone who dumped the database could grind the answer space offline and recover the vault key. That reduces every account's security to the minimum of password strength and answer strength, so the recovery path intended as a safety net would have quietly become the cheapest way in. Adding a recovery mechanism weaker than the primary credential does not add a fallback but rather replaces the primary credential from the attacker's point of view.
+- **Concatenating all five answers made it all-or-nothing.** Forget one of five and recovery fails completely, which is a high lockout risk for something whose entire purpose is preventing lockout.
 
 Dropping it is a net security improvement, not merely a deferral. The attack surface genuinely shrinks.
 
@@ -340,27 +340,27 @@ Whatever is chosen, the recovery credential must be at least as strong as the pa
 
 | Residual risk | Why it remains |
 |---|---|
-| Weak passwords | User choice, outside the system's control; mitigated by Argon2id + login rate limiting |
-| **Permanent lockout** | No recovery path in v1 — forgetting the password destroys the account (Section 12) |
+| Weak passwords | User choice, outside the system's control; mitigated by Argon2id and login rate limiting |
+| **Permanent lockout** | No recovery path in v1 because forgetting the password destroys the account (Section 12) |
 | Social engineering | Includes a user approving a malicious update without reading the diff |
-| Physical device access | Accepted tradeoff — the same USB requirement that kills remote provisioning attacks. NVS is plaintext unless flash encryption is fused |
+| Physical device access | Accepted tradeoff because the same USB requirement kills remote provisioning attacks. NVS is plaintext unless flash encryption is fused |
 | Memory scraping | Only relevant if the device is already compromised |
-| Unverified web client code | Only a risk if the browser extension isn't installed — optional, not required for the core crypto guarantees |
-| **Metadata leakage** | Inherent to the architecture, and significant for IoT — see below |
-| **Availability / withholding** | The server can refuse, stall, or delete. Cryptography detects lies; it cannot compel service |
+| Unverified web client code | Only a risk if the browser extension is not installed, which is optional and not required for the core crypto guarantees |
+| **Metadata leakage** | Inherent to the architecture and significant for IoT (see below) |
+| **Availability and withholding** | The server can refuse, stall, or delete. Cryptography detects lies but cannot compel service |
 | **Compromised device holding a grant** | Reads everything the grant covers, including full history; revocation requires physical re-provisioning (Section 9.3) |
 
 ### 13.1 Metadata leakage
 
-The server cannot read content, but it sees the shape of everything: how many devices exist, when each one uploads, how large each record is, which devices hold grants on which others, and when a client fetches what.
+The server cannot read content but sees the shape of everything: how many devices exist, when each one uploads, how large each record is, which devices hold grants on which others, and when a client fetches what.
 
 **For IoT this is not a minor leak.** A motion sensor that uploads only on activity leaks occupancy patterns to a fully passive server without a single byte being decrypted. Upload timing alone can reveal when a house is empty. Encrypting the payload does not hide the fact that a payload existed at 3:47am.
 
-Partial mitigations exist and none are free: fixed-interval uploads with padded dummy records, constant-size payloads, batching with jitter. All trade power consumption and latency for privacy, and the tradeoff differs per device class. **Not addressed in v1** — but it must be an explicit, documented limitation rather than an unnoticed one, because users will reasonably assume "zero-knowledge" covers it.
+Partial mitigations exist and none are free: fixed-interval uploads with padded dummy records, constant-size payloads, and batching with jitter. All trade power consumption and latency for privacy, and the tradeoff differs per device class. **Not addressed in v1** but it must be an explicit, documented limitation rather than an unnoticed one because users will reasonably assume "zero-knowledge" covers it.
 
 ---
 
-Every purely *software-level* trust assumption in the server has been eliminated by design. The remaining risks are physical, human, or metadata — categories cryptography does not reach.
+Every purely software-level trust assumption in the server has been eliminated by design. The remaining risks are physical, human, or metadata, categories that cryptography does not reach.
 
 ---
 

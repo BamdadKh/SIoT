@@ -1,5 +1,5 @@
 /**
- * SIOT client crypto — the whole key hierarchy of design Section 2.1.
+ * SIoT client crypto for the entire key hierarchy of design Section 2.1.
  *
  * This module lives under `frontend/` and not `backend/` on purpose: the server
  * must never be able to `import` the code that produces `kek` or `vault_key`.

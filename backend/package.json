@@ -1,7 +1,7 @@
 {
   "name": "siot-backend",
   "version": "0.1.0",
-  "description": "SIOT zero-knowledge IoT platform — backend API",
+  "description": "SIoT zero-knowledge IoT platform - backend API",
   "license": "ISC",
   "author": "",
   "type": "commonjs",

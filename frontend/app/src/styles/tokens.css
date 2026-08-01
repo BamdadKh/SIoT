@@ -1,0 +1,87 @@
+/**
+ * SIoT design tokens.
+ *
+ * Every colour, face and step the interface is allowed to use. Screens reference
+ * these and never hardcode a value, so a change here reaches the whole app.
+ *
+ * The two accents are not interchangeable:
+ *   --olive is the brand and every action the user can take.
+ *   --rust  is the datum mark, and the colour of work the app is waiting on or a
+ *           vault it cannot currently open. It is never a button. If a control
+ *           the user can press comes out rust, that is a bug.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* --- ground ------------------------------------------------------------ */
+  --paper: #efede7;
+  --grid-ink: rgba(92, 82, 64, 0.09);
+  --surface: #faf9f5;
+  --surface-input: #ffffff;
+
+  /* --- rules -------------------------------------------------------------- */
+  --line: #ddd7c9;
+  --line-strong: #b5ae9e;
+  --line-control: #c3bcab;
+
+  /* --- ink ---------------------------------------------------------------- */
+  --ink: #22201a;
+  --ink-muted: #6b6558;
+  --ink-faint: #8b8574;
+
+  /* --- olive: brand and actions ------------------------------------------ */
+  --olive: #5a6b39;
+  --olive-strong: #46542b;
+  --olive-mute: #8f9679;
+  --olive-halo: rgba(90, 107, 57, 0.14);
+  --on-olive: #f6f7f0;
+
+  /* --- rust: the datum mark, waiting, and locked --------------------------- */
+  /* Burnt orange rather than brown: it is the complement olive wants, and it has
+     to stay legible as a 2px corner tick against warm paper. */
+  --rust: #b0653a;
+  --rust-deep: #8f4e2a;
+  --rust-track: #ded8c9;
+
+  /* --- failure ------------------------------------------------------------ */
+  --alarm: #8c3a26;
+  --alarm-ground: rgba(140, 58, 38, 0.08);
+
+  /* --- type --------------------------------------------------------------- */
+  --font-sans: 'Archivo Variable', system-ui, sans-serif;
+  --font-mono: 'Martian Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Archivo is variable on the width axis. Headings run wide, buttons slightly
+     less so, the wordmark widest — set through font-variation-settings. */
+  --wdth-word: 118;
+  --wdth-head: 110;
+  --wdth-control: 108;
+
+  --size-h1: 32px;
+  --size-h2: 30px;
+  --size-h3: 20px;
+  --size-control: 15px;
+  --size-body: 14px;
+  --size-small: 13.5px;
+  --size-mono: 10px;
+  --size-label: 9px;
+
+  /* --- space -------------------------------------------------------------- */
+  --sp-1: 4px;
+  --sp-2: 7px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 26px;
+  --sp-7: 38px;
+  --sp-8: 44px;
+
+  /* The ground's grid pitch, and the size of a registration tick. Both are
+     structural: the ticks read as survey marks only while they stay square. */
+  --grid-step: 34px;
+  --tick: 13px;
+
+  --control-height: 42px;
+  --plate-width: 424px;
+}
