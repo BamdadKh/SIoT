@@ -339,14 +339,6 @@ a:hover {
   padding: 10px var(--sp-3);
 }
 
-/* The locked marker. Square, unfilled, rust: the vault is shut. */
-.seal {
-  width: 13px;
-  height: 13px;
-  border: 2px solid var(--rust);
-  flex: none;
-}
-
 /* --- app shell ----------------------------------------------------------- */
 
 .topbar {

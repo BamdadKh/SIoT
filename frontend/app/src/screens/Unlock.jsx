@@ -61,11 +61,9 @@ export function Unlock({ username, onUnlocked, onSignOut, signingOut }) {
 
   return (
     <Plate>
-      <div className="row spread" style={{ marginBottom: 'var(--sp-5)' }}>
-        <span className="wordmark">SIoT</span>
-        <span className="seal" aria-hidden="true" />
+      <div className="wordmark" style={{ marginBottom: 'var(--sp-5)' }}>
+        SIoT
       </div>
-
       <h1 className="h1">Vault locked</h1>
       <p className="prose" style={{ marginTop: 'var(--sp-3)' }}>
         Reloading cleared the key that opens your data. Enter your password to unlock it.
