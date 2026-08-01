@@ -18,6 +18,7 @@ export {
   unwrapVaultKey,
   VAULT_KEY_BYTES,
 } from './vault-key.js';
+export { encryptVault, decryptVault, VAULT_BLOB_OVERHEAD_BYTES } from './vault.js';
 
 import { deriveMasterKey } from './argon2.js';
 import { deriveLoginKey, deriveKek } from './hkdf.js';

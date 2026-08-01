@@ -16,3 +16,19 @@ export const LOGIN_KEY_BYTES = 32;
 
 /** iv(12) || ciphertext(32) || tag(16), per `frontend/lib/crypto/vault-key.js`. */
 export const WRAPPED_VAULT_KEY_BYTES = 60;
+
+/**
+ * The vault document blob, `iv(12) || ciphertext || tag(16)`, per
+ * `frontend/lib/crypto/vault.js`. Unlike everything above it this one is
+ * variable-length — it holds the whole vault, which grows with the device list —
+ * so the check is a range rather than an equality.
+ *
+ * The floor is the AEAD overhead plus one byte, which is the shortest thing that
+ * could be a real blob rather than a malformed one. The ceiling is a guess with
+ * a purpose: it is not a security boundary, it is a limit on how much storage
+ * one account can consume in a single write. 256 KiB is roughly a thousand
+ * device entries, comfortably beyond a real vault and comfortably inside the
+ * 1 MiB body limit even after base64's 4/3 expansion.
+ */
+export const VAULT_BLOB_MIN_BYTES = 12 + 16 + 1;
+export const VAULT_BLOB_MAX_BYTES = 256 * 1024;
