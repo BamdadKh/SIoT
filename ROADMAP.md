@@ -173,17 +173,26 @@ Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items 
 ## Phase 3 — Vault Storage
 
 ### 3.1 Vault write path
-- [ ] Decide vault_record granularity for v1 (single blob is simplest — pick it, revisit later per Section 15.6)
-- [ ] Client: encrypt vault contents (JSON) under `vault_key` with AES-256-GCM, include `vault_version` in AAD/plaintext
-- [ ] Route `PUT /vault` (authenticated): store ciphertext + bump `vault_version`
-- [ ] Server rejects write if client-sent version isn't `current+1` (basic conflict guard)
+- [x] Decide vault_record granularity for v1 (single blob is simplest — pick it, revisit later per Section 15.6) — **single blob**, one row per user in `vault_blobs`, which is what 0.3 already built for
+- [x] Client: encrypt vault contents (JSON) under `vault_key` with AES-256-GCM, include `vault_version` in AAD/plaintext — `frontend/lib/crypto/vault.js`; **both**, not either. AAD `"siot/vault/v1" || version(8B BE)` means a blob served under a version it was not written at cannot be opened at all; the plaintext envelope `{ version, contents }` carries the same number independently, so a disagreement is a named error rather than a bare GCM failure
+- [x] Route `PUT /vault` (authenticated): store ciphertext + bump `vault_version`
+- [x] Server rejects write if client-sent version isn't `current+1` (basic conflict guard) — as a single-statement compare-and-swap (`where vault_version = $2 - 1`), not a read-then-write: two tabs saving at once must not both pass, and a read-then-write lets them. The 409 names the current version in its message
 
 ### 3.2 Vault read path
-- [ ] Route `GET /vault` (authenticated): return ciphertext + version
-- [ ] Client decrypts with in-memory `vault_key`
+- [x] Route `GET /vault` (authenticated): return ciphertext + version — `cache-control: no-store`, for freshness rather than confidentiality: the blob is opaque to any cache it passes through, but a *stale* one is exactly the rollback the version counter exists to make loud
+- [x] Client decrypts with in-memory `vault_key` — exercised in the test console's vault panel, which lives in the same closure as `kek`/`vault_key`
 - [ ] Client caches highest seen `vault_version` in IndexedDB
 - [ ] Client refuses/warns if server returns a version lower than cached (rollback detection)
 - [ ] Test: manually roll back a vault row in the DB, confirm client surfaces a loud warning instead of silently accepting
+
+> **A vault that has never been written is `{ vault_version: 0, ciphertext: null }`, not a 404.**
+> A 404 is a second shape the client has to branch on, and the branch that skips the
+> monotonicity check is precisely the one a hostile server would want to steer it into.
+> "No vault here" and "here is last week's vault" have to be compared on the same scale.
+>
+> The last three items are the client-side half and are deliberately not done yet: they need
+> real UI (a warning someone can act on) and storage that survives a reload, which is its own
+> checkpoint rather than something to bolt onto the round-trip.
 
 ### 3.3 Password change flow
 - [ ] Client: derive new `master_key`/`kek` from new password, re-wrap existing `vault_key` (not vault contents)
@@ -210,12 +219,28 @@ Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items 
 - [ ] Client: encrypt `DEVICE_SECRET` under `vault_key`, add entry to vault's device list
 - [ ] Re-save vault via existing `PUT /vault` path (bump version)
 
-### 4.4 Web Serial provisioning tool — UI
+### 4.4 Credential handover — copy-paste (the v1 path)
+> **Changed from the original plan.** This used to be "Web Serial provisioning tool" and nothing
+> else. Web Serial is Chromium-only and the NVS partition scheme is ESP32-only, so the single
+> supported path excluded most hardware — which sits badly against publishing the wire protocol
+> for third-party ports. Copy-paste works everywhere and costs nothing cryptographically: the
+> server sees no more and no less than it would have. See design Section 5.3.1.
+
+- [ ] Screen: after generating a device, show `DEVICE_ID` + `DEVICE_SECRET` as a ready-to-paste C++ snippet (`#define SIOT_DEVICE_ID` / `SIOT_DEVICE_SECRET`, base64url), with a copy button
+- [ ] Tell the user, at the moment of handover, what they are holding: put it in a gitignored `siot_credentials.h`, and it is the only copy outside the vault
+- [ ] Say plainly that there is no overwrite protection on this path (design 5.4) — nothing stops a board being provisioned twice under two vault records
+- [ ] Offer to show it again from the vault later, rather than making the first view load-bearing
+- [ ] Never persist the plaintext secret anywhere outside the vault — not localStorage, not a downloaded file by default
+
+### 4.5 Credential handover — Web Serial to NVS (deferred)
+> **Deliberately not in v1.** It is an upgrade to a path that already works, not a prerequisite
+> for one, and it only applies on Chromium + ESP32. It is still worth building: it keeps the
+> secret out of the clipboard and out of source control, which is the one respect in which 4.4
+> is genuinely weaker (design 5.3.2). Revisit after Phase 5 proves the library end-to-end.
+
 - [ ] Basic page: "Connect device" button using Web Serial API (`navigator.serial.requestPort`)
 - [ ] Handle browser support check (Web Serial is Chromium-only — surface a clear message otherwise)
 - [ ] UI flow: select vault device record → connect to board → write
-
-### 4.5 Web Serial provisioning tool — NVS write protocol
 - [ ] Define simple serial command protocol for the tool ↔ ESP32 bootstrap sketch (e.g. `READ_ID`, `WRITE_CREDS`)
 - [ ] Write a minimal "provisioning listener" Arduino sketch that just handles NVS read/write over serial (separate from application firmware)
 - [ ] Implement read-back: tool reads existing `DEVICE_ID` from NVS before writing
@@ -229,12 +254,13 @@ Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items 
 
 ### 5.1 Library skeleton
 - [ ] New Arduino/PlatformIO library project (`SIoT` lib) separate from example sketches
-- [ ] NVS read helpers for `DEVICE_ID` / `DEVICE_SECRET` from the dedicated partition
+- [ ] `SIoT.begin(deviceId, deviceSecret)` taking the two base64url strings the user pasted in — the v1 path (4.4), and the only one that works off ESP32
+- [ ] `SIoT.begin()` with no arguments, reading the same two values from the dedicated NVS partition — stubbed until 4.5 lands, so both entry points decode to identical bytes and everything below is shared
 - [ ] Key derivation on-device: HKDF-SHA256 (need a small C++ implementation or existing lib — mbedTLS has primitives)
 - [ ] Derive `device_data_key` and `ed25519_seed` on boot
 
 ### 5.2 Sequence counters
-- [ ] Persist `boot_epoch` in NVS, increment once on boot before any record
+- [ ] Persist `boot_epoch` to non-volatile storage (NVS on ESP32), increment once on boot before any record. This one is not optional on any port, unlike credential storage — a device that forgets it repeats a `seq`, and that is nonce reuse
 - [ ] Track `msg_counter` in RAM, reset to 0 each boot, increment per record
 - [ ] Compose `seq = (boot_epoch << 32) | msg_counter`
 - [ ] Test: power-cycle device repeatedly, confirm `boot_epoch` strictly increases and never repeats
@@ -260,7 +286,7 @@ Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items 
 - [ ] End-to-end test against local dev server: one real reading, uploaded, verified
 
 ### 5.7 Example sketch
-- [ ] Minimal example: init library with NVS creds, define one reading (e.g. temperature), loop + upload every N seconds
+- [ ] Minimal example: init library with pasted creds, define one reading (e.g. temperature), loop + upload every N seconds
 - [ ] Document in README how a user writes their own sketch against the library
 
 ---
@@ -333,7 +359,7 @@ Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items 
 
 ### 8.4 Revocation flow
 - [ ] UI messaging: "revoke" = rotate B's `DEVICE_SECRET` via re-provisioning, old data stays readable by A forever
-- [ ] Re-provisioning flow reuses Phase 4 tool with a new `DEVICE_SECRET`, updates vault entry, old grants naturally stop covering new data
+- [ ] Re-provisioning flow reuses the Phase 4 handover with a new `DEVICE_SECRET`, updates vault entry, old grants naturally stop covering new data — note that on the copy-paste path this means editing and reflashing the sketch, not just clicking through a tool
 
 ---
 
