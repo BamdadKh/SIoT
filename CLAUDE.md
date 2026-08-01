@@ -142,6 +142,16 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   where someone is already looking. Markers that change to signal state were explored and
   rejected. A stray `.seal` square survived that rejection on the unlock screen and has been
   removed; anything like it reappearing is the same mistake.
+- **Account actions live under the username, not beside it.** The top bar has exactly one
+  control, and it is the username: olive with a caret, because olive is the token that says
+  "you can press this" and mono is the face that says "this is the name the server stores".
+  Change password and sign out are items in a disclosure under it (`AccountMenu.jsx`), not
+  loose buttons in the bar, so a rare action and a session-destroying one are not sitting
+  where a stray click lands. Hover opens it, but hover is never the only way in: it is a real
+  disclosure button, so click, Tab and Escape all work, and it is deliberately not
+  `role="menu"` (that pattern owes the reader roving tabindex for what is two controls in a
+  box). `.button-quiet`, the pill those two buttons used to wear, was deleted rather than left
+  in `base.css` for a later screen to copy because it was there.
 - **Directory names are `backend/` and `frontend/`**, not the `server/`/`client/` the roadmap
   suggests. The dirs predate the roadmap, and renaming buys nothing.
 - **`pg` directly, no ORM.** Raw SQL in `backend/src/`, with a thin `Postgres` wrapper
@@ -310,8 +320,8 @@ Verified by hand against a running server: wrote the vault to v2, rolled `users.
 back to 1 directly in Postgres, reloaded, and got the warning; restored to the true v2, and the
 warning cleared on the next reload. No automated test; `backend/` still has no test harness.
 
-**Phase 3.3 is done**, closing Phase 3. `ChangePassword.jsx`, reached from a link on `Devices`'
-`TopBar`, derives a new `master_key`/`kek` from the new password and re-wraps the existing
+**Phase 3.3 is done**, closing Phase 3. `ChangePassword.jsx`, reached from the account menu on
+`Devices`, derives a new `master_key`/`kek` from the new password and re-wraps the existing
 `vault_key` from the keyring under it; vault contents never move. The screen itself is a `Plate`,
 matching Sign in and Create account, with "Devices" and "Sign out" as footer links the way
 `Unlock` already does, not the `TopBar` shell `Devices` uses; a first pass borrowed `TopBar`
