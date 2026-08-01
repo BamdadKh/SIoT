@@ -122,9 +122,10 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   product that phones a third party on every page load is telling on its users for the
   sake of a stylesheet.
 - **Design tokens are the whole palette** (`app/src/styles/tokens.css`); screens never
-  hardcode a colour. The two accents are not interchangeable: `--olive` is the brand and
-  every action the user can take, `--rust` is the datum mark and the colour of work being
-  waited on or a vault that cannot be opened. A control that comes out rust is a bug.
+  hardcode a colour. The two accents are not interchangeable: `--olive` is every action the
+  user can take, `--rust` is the mark — the wordmark and the registration ticks — plus work
+  being waited on or a vault that cannot be opened. A control that comes out rust is a bug,
+  and so is a wordmark that comes out olive.
 - **Directory names are `backend/` and `frontend/`**, not the `server/`/`client/` the roadmap
   suggests — the dirs predate the roadmap and renaming buys nothing.
 - **`pg` directly, no ORM.** Raw SQL in `backend/src/`, with a thin `Postgres` wrapper
