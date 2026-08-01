@@ -21,6 +21,7 @@ const API_PATHS = [
   '/logout',
   '/vault-key',
   '/vault',
+  '/change-password',
 ];
 
 /**

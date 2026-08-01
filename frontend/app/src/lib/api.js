@@ -105,3 +105,17 @@ export function fetchWrappedVaultKey() {
 export function fetchVault() {
   return request('GET', '/vault');
 }
+
+/**
+ * Rotates the account password: a fresh salt, a new `login_key`, and the
+ * existing `vault_key` re-wrapped under the new `kek`. Vault contents are
+ * untouched. The server re-verifies `current_login_key` against the stored
+ * hash before accepting any of it; a tab being unlocked is not something the
+ * server ever saw happen.
+ *
+ * @param {{ current_login_key: string, salt: string, login_key: string, wrapped_vault_key: string }} body
+ *        every value base64url
+ */
+export function changePassword(body) {
+  return request('POST', '/change-password', body);
+}

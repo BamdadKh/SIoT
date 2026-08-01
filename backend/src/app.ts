@@ -9,6 +9,7 @@ import { postgresPlugin } from './db/postgres.js';
 import { redisPlugin } from './db/redis.js';
 import { requireSession, sessionPlugin } from './lib/require-session.js';
 import { authRoutes } from './routes/auth.js';
+import { changePasswordRoutes } from './routes/change-password.js';
 import { healthRoutes } from './routes/health.js';
 import { sessionRoutes } from './routes/session.js';
 import { vaultRoutes } from './routes/vault.js';
@@ -95,6 +96,7 @@ export async function buildApp() {
     scope.addHook('onRequest', requireSession);
     await scope.register(sessionRoutes);
     await scope.register(vaultRoutes);
+    await scope.register(changePasswordRoutes);
   });
 
   // Dev-only convenience: serve the plain-HTML test console from the API origin

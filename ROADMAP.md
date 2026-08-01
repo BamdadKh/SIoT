@@ -193,9 +193,16 @@ Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items 
 Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 
 ### 3.3 Password change flow
-- [ ] Client: derive new `master_key`/`kek` from new password, re-wrap existing `vault_key` (not vault contents)
-- [ ] Route `POST /change-password`: update salt (if rotated), login_key_hash, wrapped_vault_key
-- [ ] Test: old password no longer logs in, new password does, vault contents unchanged/still decryptable
+- [x] Client: derive new `master_key`/`kek` from new password, re-wrap existing `vault_key` (not vault contents), in `ChangePassword.jsx`, reached from a link on `Devices`. `vault_key` comes straight from the keyring, already unlocked to get here; only its wrapping moves. The screen itself is a `Plate` (matching Sign in and Create account), not the `TopBar` shell, since it is a focused single-purpose action, not the main app view; the first pass used `TopBar` and was corrected after hand-testing showed it off-centre and inconsistent
+- [x] Route `POST /change-password`: update salt (if rotated), login_key_hash, wrapped_vault_key. Salt always rotates; there is no case where keeping the old one is right. Deviation from the item as written: the body also carries `current_login_key`, checked against the stored hash before anything is written. Without it, a stolen session cookie alone (no `kek`, no XSS) could overwrite `wrapped_vault_key` with garbage and permanently orphan the real `vault_key`, since the server has no way to check that a new wrapped blob still decrypts to the same key. Wrong current password is a 403, throttled by its own Redis bucket (`changePasswordThrottle`, keyed by user id) rather than sharing `/login`'s, since getting to this endpoint at all already requires a live session
+- [x] Test: old password no longer logs in, new password does, vault contents unchanged/still decryptable. Verified by hand: signed up, changed password, old password rejected at `/sign-in`, new password logs in and unlocks the same vault with no rollback warning. No automated test; same gap as 2.3 and the rest of `backend/`
+
+> Caught during hand-testing, not code review: the client route and the server route were both
+> `/change-password`, so a full page reload on that URL got proxied straight to the backend
+> (`GET`, 404) instead of falling through to the SPA shell, the exact collision `/sign-in` vs
+> `/login` and `/sign-up` vs `/signup` already avoid elsewhere. The client-visible path is
+> `/password`; the server route stays `POST /change-password`. Also needed adding to `API_PATHS`
+> in `vite.config.js`, the gotcha the frontend README already names.
 
 ---
 
