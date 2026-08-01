@@ -17,6 +17,7 @@
     "migrate:down": "npm run migrate -- down"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.2",
     "@fastify/static": "^10.1.2",
     "@fastify/type-provider-typebox": "^6.1.0",
     "@node-rs/argon2": "^2.0.2",
