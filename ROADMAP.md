@@ -29,14 +29,28 @@ Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items 
 - [x] Write a migration tool setup (node-pg-migrate or similar) — first migration creates these tables
 
 ### 0.4 Frontend skeleton
-> Deferred deliberately: the real client is React, but until there's an API worth calling
-> the frontend is a single plain-HTML test console (`frontend/index.html`), served by the
-> backend in dev so it's same-origin. Revisit when Phase 2 needs real forms and routing.
+> Deferred through Phases 1 and 2, then picked up once there was an API worth calling.
+> The plain-HTML test console (`frontend/index.html`) **stays** — it is how the crypto
+> primitives get exercised directly, and the backend still serves it in dev.
 
-- [ ] Scaffold React app (Vite)
-- [ ] Add routing (login, signup, dashboard placeholder pages)
-- [ ] Add a basic layout shell (nav, empty content area)
+- [x] Scaffold React app (Vite) — lives in `frontend/app/`, with `vite.config.js` at
+      `frontend/` (`root: 'app'`). One npm package, still no workspaces. The dev server
+      runs HTTPS off the backend's own cert and proxies the API paths to `:3030`; that is
+      not optional, since the session cookie is `Secure; SameSite=Strict` and a plaintext
+      dev server drops it silently
+- [x] Add routing (login, signup, dashboard placeholder pages) — a ~40 line
+      `lib/router.jsx`, not React Router. Four screens: sign in, sign up, unlock, devices
+- [x] Add a basic layout shell (nav, empty content area) — `TopBar` + `.page`; no nav
+      links, because there is exactly one page until Phase 4 adds pairing
 - [x] Confirm it can hit `GET /health` on the backend
+
+> **The screen the plan did not anticipate: `Unlock`.** Which screen shows is decided by
+> two independent facts, not one — is there a session (the cookie, survives a reload) and
+> is the vault open (`kek` in memory, does not). Every refresh lands in the pair
+> (session, locked), so it gets a real screen rather than a redirect to sign-in. It never
+> calls `/login`: the password is checked by whether the derived `kek` opens the 60-byte
+> blob, entirely client-side, and a wrong guess is a GCM failure the server never hears
+> about.
 
 ### 0.5 Local HTTPS
 - [x] Generate self-signed cert for local dev — `npm run gen-cert`; SANs cover `localhost` and every LAN IP, so a device can reach it by address and still validate. Also prints the SPKI pin for Phase 5.6
