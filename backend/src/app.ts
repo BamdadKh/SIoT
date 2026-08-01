@@ -10,6 +10,7 @@ import { redisPlugin } from './db/redis.js';
 import { requireSession, sessionPlugin } from './lib/require-session.js';
 import { authRoutes } from './routes/auth.js';
 import { changePasswordRoutes } from './routes/change-password.js';
+import { deviceRoutes } from './routes/devices.js';
 import { healthRoutes } from './routes/health.js';
 import { sessionRoutes } from './routes/session.js';
 import { vaultRoutes } from './routes/vault.js';
@@ -97,6 +98,7 @@ export async function buildApp() {
     await scope.register(sessionRoutes);
     await scope.register(vaultRoutes);
     await scope.register(changePasswordRoutes);
+    await scope.register(deviceRoutes);
   });
 
   // Dev-only convenience: serve the plain-HTML test console from the API origin
