@@ -365,3 +365,28 @@ session that touches the frontend. Verified by hand with a throwaway script gene
 duplicate rejection, cross-owner uniqueness, unauthenticated 401, malformed-length 400, and
 per-owner scoping on the list route all behaved as expected. No automated test; same gap as
 the rest of `backend/`.
+
+**Phase 6.1 and 6.2 are done, out of order and backend-only, same as 4.2/4.8 before them.**
+`POST /records` (`src/routes/records.ts`) is the first route authenticated by a device
+signature rather than a session cookie, so it is registered in its own public scope in
+`app.ts`, not inside `requireSession`'s. It runs design 7.4's three checks in order:
+`Ed25519_verify` against the registered `sign_pub` (`src/lib/ed25519.ts`, Node's native
+`crypto.verify` via a JWK-reconstructed key, no dependency needed), `seq > last_seq` as a
+single-statement compare-and-swap in the same transaction as the insert (same shape as the
+`vault_version` CAS), and the nonce/`seq` consistency check. `GET /devices/:id/records`
+(`src/routes/devices.ts`) closes 6.2, cursor-paginated by `seq` rather than time since `seq`
+is the authoritative order and a device's clock is never trusted for anything else either.
+
+Design 7.3's AAD needs `version` and `record_type` bytes that section 7.3's own `POST
+/records` example body does not carry. Resolved by treating both as fixed v1 protocol
+constants (`PROTOCOL_VERSION`, `RECORD_TYPE_V1` in `src/lib/wire-format.ts`) rather than wire
+fields; see the roadmap 6.1 note for the reasoning, and `docs/protocol.md` (roadmap 4.7, not
+yet written) needs to state it as a non-negotiable for third-party firmware.
+
+6.3 (client-side decrypt and gap detection) is `frontend/` work and was left for a session
+that touches the frontend, same reasoning as 4.1/4.3/4.8's remainder. Verified by hand with a
+throwaway script standing in for the Phase 5 firmware and Phase 4.1 browser derivation
+(neither exists yet): a correctly signed upload, a replayed `seq`, a tampered signature, a
+mismatched nonce/`seq` pairing, an unknown `device_id`, a `boot_epoch` jump exercising the
+full uint64 range, and paginated reads scoped correctly per owner. No automated test; same
+gap as the rest of `backend/`.

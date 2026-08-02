@@ -38,3 +38,34 @@ export const DEVICE_ID_BYTES = 16;
 
 /** Ed25519 public key, `frontend/lib/crypto/` device key derivation (design 5.1). */
 export const SIGN_PUB_BYTES = 32;
+
+/** `0x00000000 || seq(8B BE)`, design Section 7.2. */
+export const NONCE_BYTES = 12;
+
+/** Ed25519 signature over `AAD || nonce || ciphertext`, design Section 7.3. */
+export const SIG_BYTES = 64;
+
+/**
+ * `AES-256-GCM(device_data_key, nonce, CBOR{t, r}, AAD)`, design Section 7.3.
+ * Floor is the GCM tag plus one byte of CBOR, same reasoning as the vault blob
+ * floor. No ceiling from the protocol itself; `RECORD_CIPHERTEXT_MAX_BYTES` is a
+ * generous storage cap (one reading upload, not a batch), comfortably inside the
+ * body limit after base64 expansion.
+ */
+export const RECORD_CIPHERTEXT_MIN_BYTES = 16 + 1;
+export const RECORD_CIPHERTEXT_MAX_BYTES = 4 * 1024;
+
+/**
+ * The AAD's `version` and `record_type` bytes (design Section 7.3) are fixed
+ * protocol constants for v1, not wire fields — `POST /records` carries only
+ * `{ device_id, seq, nonce, ciphertext, sig }` (design 7.3's own example), so
+ * both sides reconstruct the same AAD from these plus the wire `device_id` and
+ * `seq`. `record_type` is reserved for Phase 7's per-schema record types; until
+ * then every record is type 0.
+ */
+export const PROTOCOL_VERSION = 1;
+export const RECORD_TYPE_V1 = 0;
+
+/** `seq` is a uint64; 20 digits covers up to 2^64-1 with room to spare. */
+export const SEQ_MAX_DIGITS = 20;
+export const UINT64_MAX = (1n << 64n) - 1n;
