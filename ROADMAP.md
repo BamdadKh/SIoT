@@ -209,11 +209,18 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 ## Phase 4 — Device Identity & Provisioning
 
 ### 4.1 Device key derivation (browser side)
-- [ ] Generate `DEVICE_SECRET` (32B CSPRNG) in browser
-- [ ] Derive `device_data_key` via HKDF info=`"siot/device/data/v1"`
-- [ ] Derive `ed25519_seed` via HKDF info=`"siot/device/sign/v1"`, derive keypair from it
-- [ ] Generate `DEVICE_ID` (128-bit random)
-- [ ] Unit test: deterministic derivation from same `DEVICE_SECRET` reproduces same keys
+- [x] Generate `DEVICE_SECRET` (32B CSPRNG) in browser — `frontend/lib/crypto/device.js`
+- [x] Derive `device_data_key` via HKDF info=`"siot/device/data/v1"` — added to `HKDF_INFO` alongside the two account labels, with a note that these two differ from those in kind: firmware computes them too, so they are a wire format shared with every port rather than an internal name
+- [x] Derive `ed25519_seed` via HKDF info=`"siot/device/sign/v1"`, derive keypair from it — `frontend/lib/crypto/ed25519.js`. Web Crypto has no seeded `generateKey`, so the seed goes in through the fixed 16-byte PKCS#8 preamble every Ed25519 private key shares, and the public half comes back out through a JWK export (the only route Web Crypto offers from private key to public bytes). No `@noble/ed25519` or `tweetnacl`, same reasoning as `backend/src/lib/ed25519.ts`: the platform already ships an audited implementation
+- [x] Generate `DEVICE_ID` (128-bit random)
+- [x] Unit test: deterministic derivation from same `DEVICE_SECRET` reproduces same keys — plus RFC 8032 known-answer vectors pinning both the public key and a signature. The 16 preamble bytes are hand-written, and a wrong one would still import cleanly and produce a confident, useless key; the signature vector separately pins that this is pure Ed25519 rather than a prehashed or context variant, which would derive the identical public key and then fail verification at `POST /records` with nothing to point at. One test signs and verifies through Node's `crypto.verify` with a JWK-reconstructed key, which is byte for byte what the server does, so it asserts the real property: what the browser derives is what the server will accept
+
+> **`deriveDeviceKeys` returns the data key and the public key, and zeroes the signing
+> seed.** A provisioning screen has no use for signing authority (design 5.1: that is what
+> never leaves the device), and the seed is reproducible from `DEVICE_SECRET` by anyone who
+> legitimately holds it. `ed25519Sign` is exported anyway, for `node --test` and for a
+> stand-in script impersonating firmware that does not exist yet; nothing in `frontend/app/`
+> imports it, and an app screen that did would be the bug.
 
 ### 4.2 Device registration — server
 - [x] Table already has `devices` (from 0.3) — confirm columns match: device_id, sign_pub, owner_user_id
@@ -226,13 +233,38 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > was built and hand-verified with a throwaway script generating random `device_id`/`sign_pub`
 > bytes directly, standing in for the client derivation 4.1 will eventually produce. No
 > automated test; same gap as the rest of `backend/`.
+>
+> 4.1 has since landed, so the stand-in is retired: `generateDevice()` produces the real
+> `device_id`/`sign_pub` this route accepts, and `test/ed25519.test.js` verifies a browser
+> signature through the same JWK path `src/lib/ed25519.ts` verifies with.
 
 ### 4.3 Device record in the vault
-- [ ] Client: encrypt `DEVICE_SECRET` under `vault_key`, add entry to vault's device list
-- [ ] Include the user's **name** for the device in that entry (design 5.5) — the name lives in the vault and nowhere else; there is no `name` column on `devices` and adding one would be wrong
-- [ ] Ask for the name during setup, before the device exists, so nothing is ever displayed as a bare `DEVICE_ID`
-- [ ] Rename is just a vault write — same `PUT /vault` path, same version bump, no new endpoint
+- [x] Client: encrypt `DEVICE_SECRET` under `vault_key`, add entry to vault's device list — `frontend/lib/crypto/vault-document.js`. **Deviation: there is no second encryption.** The whole document is already sealed under `vault_key` by `encryptVault`, so a nested AES-GCM layer under the identical key would add a nonce to manage and no confidentiality at all. `DEVICE_SECRET` is *encrypted in the vault*, which is what design 5.2's table asks for. A separate per-record wrapping starts earning its keep at per-device granularity (design 15.6), where one record could be handed out without the rest of the document; v1 is one blob per user, so there is nothing to hand out
+- [x] Include the user's **name** for the device in that entry (design 5.5) — the name lives in the vault and nowhere else; there is no `name` column on `devices` and adding one would be wrong. A test asserts the name does not appear in the sealed blob's bytes
+- [x] Ask for the name during setup, before the device exists, so nothing is ever displayed as a bare `DEVICE_ID` — enforced at the data layer: `addDevice` takes the name as a required argument, so there is no way to write an unnamed entry and label it later
+- [x] Rename is just a vault write — same `PUT /vault` path, same version bump, no new endpoint. `renameDevice` touches the name and nothing else, so it survives a re-provisioning (design 8.4) unchanged
 - [ ] Re-save vault via existing `PUT /vault` path (bump version)
+
+> **Unticked deliberately: nothing calls `PUT /vault` from the React client yet.** The
+> document layer is complete and unit tested, but the write is the second half of the
+> provisioning flow (4.4) and lands with it, along with `saveVault` in `app/src/lib/api.js`
+> and `/vault` gaining `PUT` in the proxy list. The test console already exercises the
+> endpoint, so this is a client wiring gap, not an untested path.
+
+> Two design decisions this pass made that the item did not anticipate. **Every function
+> returns a new document rather than mutating one**, because `PUT /vault` can lose its
+> compare-and-swap and 409, and the caller then has to refetch and re-apply against the
+> server's newer document; an in-place edit would have already corrupted the copy it is
+> retrying from. And **reading drops entries it cannot parse instead of throwing**: the blob
+> is authenticated, so a malformed record means a bug in some version of this client rather
+> than tampering, and one bad entry must not make the other devices unreachable. The count
+> comes back so a caller can say so rather than swallowing it.
+>
+> Device names are stripped of C0/C1 controls, the bidi overrides and the zero-width
+> characters. Not an XSS defence (React escapes, and the vault is authenticated) but a
+> display-integrity one: a right-to-left override can make one device's name render as
+> another's, and a device list is exactly where "this is the sensor you think it is" has to
+> hold.
 
 ### 4.4 Web Serial provisioning tool — UI
 > **The supported path, and the only one the app walks a user through.** Chromium + ESP32 is a

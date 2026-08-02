@@ -413,3 +413,31 @@ two devices succeeds, naming the other account's device on either side is reject
 unauthenticated create is rejected (401), a second grant for the same device pair adds a row
 rather than replacing one, and an ungranted device reads back an empty list. No automated
 test.
+
+**Phase 4.1 and 4.3 are done, `frontend/lib/` only, no screens touched.** `lib/crypto/device.js`
+mints a `DEVICE_ID`/`DEVICE_SECRET` pair and splits the secret under the two HKDF labels design
+5.1 names, and `lib/crypto/ed25519.js` turns the signing seed into the `sign_pub`
+`POST /devices/register` wants. Web Crypto has no seeded `generateKey`, so the seed goes in
+through the fixed 16-byte PKCS#8 preamble every Ed25519 private key shares and the public half
+comes back out through a JWK export, which is the only route Web Crypto offers from a private
+key to its public bytes. That is also why the imported key is `extractable: true`: it is the
+mechanism, not laxness. No `@noble/ed25519` or `tweetnacl`, for the same reason
+`src/lib/ed25519.ts` has none. `deriveDeviceKeys` hands back the data key and the public key
+and zeroes the signing seed; `ed25519Sign` exists for tests and firmware stand-ins, and an
+`app/` screen importing it would be the bug.
+
+`lib/crypto/vault-document.js` is the shape of what the sealed blob contains: a device list
+where each entry is `{ id, secret, name, added_at }`. It does **not** encrypt `DEVICE_SECRET` a
+second time the way roadmap 4.3 reads; the document is already sealed under `vault_key`, and a
+nested layer under the identical key buys a nonce to manage and no confidentiality. Every
+function returns a new document rather than mutating one, because a `PUT /vault` 409 means
+refetching and re-applying and an in-place edit would have corrupted the copy being retried
+from. Reading drops entries it cannot parse (with a count, not silently) rather than throwing,
+since the blob is authenticated and one bad record must not hide the rest. Names are stripped
+of controls, bidi overrides and zero-width characters: a display-integrity measure, not an XSS
+one.
+
+The frontend suite is 65 `node --test` cases, up from 28. Nothing in `frontend/app/` calls any
+of this yet: the provisioning screen is 4.4 and the device list join is the rest of 4.8. The
+one roadmap 4.3 item left unticked is "re-save vault via `PUT /vault`", which needs `saveVault`
+in `app/src/lib/api.js` and `PUT` reaching `/vault` through the Vite proxy, and lands with 4.4.

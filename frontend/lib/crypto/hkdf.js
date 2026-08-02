@@ -14,7 +14,11 @@ import { utf8Bytes } from './encoding.js';
 export const HKDF_INFO = Object.freeze({
   LOGIN_KEY: 'siot/auth/v1',
   KEK: 'siot/kek/v1',
-  // Phase 4 will add: 'siot/device/data/v1', 'siot/device/sign/v1'.
+  // The device pair (design 5.1). Unlike the two above, these are also computed
+  // by firmware, so they are a wire format shared with every port: see
+  // `device.js`. An "equivalent" label is not equivalent.
+  DEVICE_DATA: 'siot/device/data/v1',
+  DEVICE_SIGN: 'siot/device/sign/v1',
 });
 
 /**
