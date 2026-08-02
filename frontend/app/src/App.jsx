@@ -6,6 +6,7 @@ import { SignIn } from './screens/SignIn.jsx';
 import { SignUp } from './screens/SignUp.jsx';
 import { Unlock } from './screens/Unlock.jsx';
 import { Devices } from './screens/Devices.jsx';
+import { AddDevice } from './screens/AddDevice.jsx';
 import { ChangePassword } from './screens/ChangePassword.jsx';
 
 /**
@@ -84,6 +85,17 @@ export function App() {
   if (path === '/password') {
     return (
       <ChangePassword username={session.username} onSignOut={handleSignOut} signingOut={signingOut} />
+    );
+  }
+
+  // `/add-device`, not the `/devices/new` it reads like, because `API_PATHS` in
+  // vite.config.js matches by prefix: `/devices` claims every path under it, and
+  // a reload there would be proxied to the backend and 404 rather than falling
+  // through to this shell. Same collision `/password` vs `/change-password`
+  // already exists to avoid.
+  if (path === '/add-device') {
+    return (
+      <AddDevice username={session.username} onSignOut={handleSignOut} signingOut={signingOut} />
     );
   }
 
