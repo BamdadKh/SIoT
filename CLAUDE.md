@@ -437,7 +437,30 @@ since the blob is authenticated and one bad record must not hide the rest. Names
 of controls, bidi overrides and zero-width characters: a display-integrity measure, not an XSS
 one.
 
-The frontend suite is 65 `node --test` cases, up from 28. Nothing in `frontend/app/` calls any
-of this yet: the provisioning screen is 4.4 and the device list join is the rest of 4.8. The
-one roadmap 4.3 item left unticked is "re-save vault via `PUT /vault`", which needs `saveVault`
-in `app/src/lib/api.js` and `PUT` reaching `/vault` through the Vite proxy, and lands with 4.4.
+**Phase 4.3 is closed and 4.8's client half with it; 4.4 has a screen that stops short of the
+board.** `app/src/lib/vault-store.js` is the only way the React client touches the vault:
+`loadVault` fetches, runs the 3.2 rollback check and opens the blob, `storeVault` seals and
+`PUT`s the next version. The check throws `VaultRollbackError` rather than returning a flag, so
+a second caller cannot forget it: there is no branch to leave unwritten, only a `catch` to leave
+unhandled. The high-water mark is raised only after the blob has actually opened at the version
+the server claimed.
+
+`AddDevice.jsx` (`/add-device`, not `/devices/new`, because `API_PATHS` matches by prefix) mints
+a device, seals it into the vault, then registers the public half. **That order is the reverse of
+design 5.3's and is deliberate**: register-then-fail burns a `DEVICE_ID` whose `DEVICE_SECRET`
+only existed in that tab, permanently; vault-then-fail leaves the secret safe and the same id
+re-registerable, which is the button `Devices` offers. One order is recoverable and the other is
+not. Web Serial (design 5.3 step 4, roadmap 4.5) is not built, so the completion state says so
+rather than implying a device is ready.
+
+`Devices.jsx` joins `loadVault` against `GET /devices` by `DEVICE_ID` and nothing else, in
+`app/src/lib/device-list.js`. Three states: paired, unregistered (in the vault, unknown to the
+server, recoverable) and orphan (registered, no vault record, so its `DEVICE_SECRET` is gone and
+its records are unreadable for good). The orphan is rust, the token for a vault that will not
+open, not `--alarm`, which is for something the person did or can retry. `app/src/lib/last-seen.js`
+words liveness with no threshold and never as "offline"; a test asserts that absence rather than
+leaving it to review.
+
+The frontend suite is 81 `node --test` cases, up from 28. `device-list.js` and `last-seen.js`
+are React-free and crypto-free so the suite reaches them directly. The screens themselves are
+still uncovered, same gap as the rest of the client and all of `backend/`.
