@@ -390,3 +390,26 @@ throwaway script standing in for the Phase 5 firmware and Phase 4.1 browser deri
 mismatched nonce/`seq` pairing, an unknown `device_id`, a `boot_epoch` jump exercising the
 full uint64 range, and paginated reads scoped correctly per owner. No automated test; same
 gap as the rest of `backend/`.
+
+Phase 7 (dashboard/schemas) has no backend slice at all — a schema is just vault contents,
+already served by `PUT`/`GET /vault` — so it was skipped whole rather than partially.
+
+**Phase 8.2 (grant storage) is done, backend-only.** `src/routes/grants.ts` and migration
+`1785650000000_grants.js` add the `grants` table and two routes: `POST /grants`, session
+authenticated, requiring the caller to own *both* named devices (checked in one query, so
+there is no window between checking each side); and `GET /devices/:id/grants`, public and
+registered alongside `POST /records`, since Device A's own firmware polls it (design 9.3) and
+holds no session the same way an uploading device does not. The roadmap item as written flags
+its own open policy question ("must own both devices or have rights — decide policy"); this
+pass decided "must own both", since nothing else in the design or roadmap has a cross-user
+device-sharing primitive for "have rights" to mean anything yet. The `grants` table has
+deliberately no uniqueness constraint on `(device_a_id, device_b_id)`: design 9.3's "old data
+stays readable by A forever" depends on A being able to fetch the grant wrapping the *old*
+`device_B_data_key` after B's `DEVICE_SECRET` rotates, and upserting on re-grant would destroy
+that row. 8.1 (grant creation UI), 8.3 (device-side grant consumption), and 8.4
+(re-provisioning UI) are `frontend/app/` and Phase 5 firmware work, left for sessions that
+touch those. Verified by hand: two accounts, three devices; granting between one account's own
+two devices succeeds, naming the other account's device on either side is rejected (403), an
+unauthenticated create is rejected (401), a second grant for the same device pair adds a row
+rather than replacing one, and an ungranted device reads back an empty list. No automated
+test.

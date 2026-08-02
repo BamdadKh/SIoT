@@ -405,6 +405,12 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 - [ ] Drag-and-drop layout library integration (e.g. `react-grid-layout`)
 - [ ] Persist layout as part of vault data (encrypted)
 
+> Phase 7 has no backend-only slice: a schema is just vault contents (`PUT`/`GET /vault`,
+> already done in Phase 3), and validation/rendering are entirely `frontend/app/` concerns.
+> Skipped in a backend-only pass for that reason, same as the frontend items in 4.x and 6.3 —
+> not because anything here turned out wrong, just nothing left to build without touching
+> `frontend/`.
+
 ---
 
 ## Phase 8 — Inter-Device Grants
@@ -416,9 +422,16 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 - [ ] Upload grant blob
 
 ### 8.2 Grant storage — server
-- [ ] `grants` table: id, device_a_id, device_b_id, ciphertext, created_at
-- [ ] Route `POST /grants` (authenticated, must own both devices or have rights — decide policy)
-- [ ] Route `GET /devices/:id/grants` for a device to fetch grants targeting it
+- [x] `grants` table: id, device_a_id, device_b_id, ciphertext, created_at — migration `1785650000000_grants.js`. Deliberately **no** uniqueness constraint on `(device_a_id, device_b_id)`: design 9.3 says old data must stay readable by A forever, which depends on A being able to fetch the grant that wrapped the *old* `device_B_data_key` after B rotates; upserting on re-grant would destroy that row. Multiple grants per pair, one per key epoch, newest first
+- [x] Route `POST /grants` (authenticated, must own both devices or have rights — decide policy) — `src/routes/grants.ts`. **Policy decided:** must own both. There is no cross-user device-sharing primitive anywhere else in the design or roadmap, so a grant between two different users' devices has no authorization to check yet; this is the policy to revisit if that changes. Ownership of both devices is checked in one query (`select ... where owner_user_id = $1 and device_id in ($2, $3)`, `rowCount !== 2`), not two, so there is no window between checking A and checking B for either to change hands
+- [x] Route `GET /devices/:id/grants` for a device to fetch grants targeting it — public, not session-authenticated, registered alongside `POST /records` outside `requireSession`'s scope: Device A's own firmware polls this (design 9.3) and holds no session. Design 13.1 already lists "which devices hold grants on which others" as metadata the server is acknowledged to see, so an unauthenticated read of opaque ciphertext scoped by a 128-bit `device_id` adds no new leak beyond that
+
+> Verified by hand: two accounts, three devices (two owned by account 1, one by account 2).
+> Account 1 granting between its own two devices succeeds (201); account 1 naming account 2's
+> device as either side is rejected (403); an unauthenticated create is rejected (401); issuing
+> a second grant for the same device pair leaves both rows queryable rather than overwriting,
+> newest first; and a device with no grants targeting it reads back an empty list rather than
+> an error. No automated test; same gap as the rest of `backend/`.
 
 ### 8.3 Grant consumption — device
 - [ ] Device A firmware: fetch grants where it's the recipient, decrypt with its own `device_data_key`
@@ -428,6 +441,11 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 ### 8.4 Revocation flow
 - [ ] UI messaging: "revoke" = rotate B's `DEVICE_SECRET` via re-provisioning, old data stays readable by A forever
 - [ ] Re-provisioning flow reuses the Phase 4 tool with a new `DEVICE_SECRET`, updates vault entry, old grants naturally stop covering new data — the device's name should survive the rotation, since it is the same physical thing in the same place
+
+> 8.1, 8.3, and 8.4 are `frontend/app/` and Phase 5 firmware work (grant creation UI,
+> device-side grant consumption, re-provisioning UI) and were left for sessions that touch
+> those, same reasoning as everywhere else in this pass. 8.2 is done and independently
+> testable via `POST /grants` and `GET /devices/:id/grants`.
 
 ---
 
