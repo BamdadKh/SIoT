@@ -1,0 +1,42 @@
+# SIoT partition table (design 5.3 step 4: a *dedicated* NVS partition).
+#
+# The standard ESP32 4MB "default" table with one partition inserted: `siot`,
+# carved out of the front of spiffs. Everything before it keeps its stock offset,
+# so this table is a superset of the default rather than a rearrangement of it.
+#
+# Why a partition of its own rather than a namespace in the stock `nvs`:
+#
+#   The application firmware owns `nvs`. It is where WiFi credentials live, where
+#   the Arduino core's own state lives, and where a sketch's `Preferences` calls
+#   land by default. `nvs_flash_erase()` and a `Preferences.clear()` aimed at the
+#   wrong namespace both wipe the whole of it, and a factory-reset routine doing
+#   exactly that is an ordinary thing for a sketch to have. If DEVICE_SECRET were
+#   in there it would go with it, and the device would be an orphan (design 5.4)
+#   with no way back: the secret exists in the vault, but nothing can put it back
+#   on the board except a re-provision the user has no reason to know they need.
+#
+#   Separating them means the credentials survive anything the application does
+#   to its own storage, and survive a sketch upload by construction, since
+#   `arduino-cli upload` writes the bootloader, the table and the app image and
+#   touches no data partition. That is the "decoupled from the firmware image"
+#   property design 5.3 claims for this path, and it is only true if the region
+#   the credentials live in is not one the firmware writes to.
+#
+# Moving `siot`'s offset in a later revision of this table orphans every board
+# already provisioned: the bytes stay in flash at the old address and the new
+# table looks straight past them. Append, or grow spiffs' end, never shift this
+# one.
+#
+# 0x5000 is 20 KB, five sectors. NVS needs at least three, and the contents here
+# are 48 bytes forever, so this is almost entirely headroom. It costs nothing
+# worth counting out of a 4MB flash and leaves room for a v2 record without
+# another table revision.
+
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x5000,
+otadata,    data, ota,      0xe000,   0x2000,
+app0,       app,  ota_0,    0x10000,  0x140000,
+app1,       app,  ota_1,    0x150000, 0x140000,
+siot,       data, nvs,      0x290000, 0x5000,
+spiffs,     data, spiffs,   0x295000, 0x15B000,
+coredump,   data, coredump, 0x3F0000, 0x10000,
