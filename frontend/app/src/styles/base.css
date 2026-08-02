@@ -99,6 +99,13 @@ a:hover {
   color: var(--ink-muted);
 }
 
+/* For a value the app is reporting the absence of ("nothing accepted yet")
+   rather than one it is showing. Absence reads as lighter ink, the same way
+   `.device-nameless` does. */
+.ink-faint {
+  color: var(--ink-faint);
+}
+
 /* Reserved for values the machine owns rather than the person: usernames as
    stored, device ids, sequence numbers. Never for prose. */
 .mono {
@@ -384,6 +391,25 @@ a:hover {
   padding: 10px var(--sp-3);
 }
 
+/* The fourth member of the family above, in rust: the token tokens.css reserves
+   for a vault that cannot be opened. Same box metrics as `.alarm`, differing
+   only in token, and it is deliberately not `.alarm` — that colour is for
+   something the person did or can retry, and an orphan's `DEVICE_SECRET` is
+   gone with nothing left to attempt. */
+.unreadable {
+  border: 1px solid var(--rust);
+  background: var(--rust-ground);
+  color: var(--rust-deep);
+  font-size: var(--size-small);
+  line-height: 1.5;
+  padding: 10px var(--sp-3);
+  margin: 0;
+}
+
+.unreadable .mono {
+  color: inherit;
+}
+
 /* A vault the client refuses to open uses rust, not alarm. `--alarm` is for a
    wrong password or a network failure, something the person did or can retry.
    This is the token reserved for "a vault that cannot currently be opened"
@@ -416,6 +442,24 @@ a:hover {
   padding: var(--sp-8) 28px;
   max-width: 1100px;
   margin: 0 auto;
+}
+
+/* One device is a document rather than a register, so it is set in a measure
+   that stays readable instead of stretched to the page's full width. Left
+   aligned, not centred: it starts on the same gutter the top bar does. */
+.page-column {
+  max-width: 560px;
+}
+
+/* The way back, above the heading rather than in a footer row. `Devices` and
+   `Add device` put theirs in a footer because they are plates that a person
+   finishes and leaves; this is a place in the app, and the link is a position
+   in it. No styling beyond size and spacing, so it stays the one link
+   appearance the rest of the app uses. */
+.page-back {
+  display: inline-block;
+  font-size: var(--size-small);
+  margin-bottom: var(--sp-5);
 }
 
 /* --- account menu -------------------------------------------------------- */
@@ -641,6 +685,57 @@ a:hover {
 
 .device-note-error {
   color: var(--alarm);
+}
+
+/* --- one device ---------------------------------------------------------- */
+
+.device-title {
+  overflow-wrap: anywhere;
+  margin-bottom: var(--sp-5);
+}
+
+/* What is known about the device, in the label face the form fields already use
+   for values the machine owns. A two-column grid on the <dl> itself, so the
+   <dt>/<dd> pairs stay real markup rather than being wrapped in rows to please
+   the layout. */
+.spec {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--sp-4) var(--sp-5);
+  align-items: baseline;
+}
+
+.spec dt {
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.spec dd {
+  margin: 0;
+  min-width: 0;
+}
+
+/* The full 22 characters, and they must not push the column wider than the
+   measure. */
+.spec-id {
+  overflow-wrap: anywhere;
+}
+
+/* A raw uint64 says nothing on its own; the gloss beneath is what it means. */
+.spec-gloss {
+  display: block;
+  margin-top: var(--sp-1);
+}
+
+/* Sections stacked down the column, separated by space rather than by rules.
+   The column is narrow enough that the left edge already groups them, and a
+   rule between each would cut the page into slabs it does not have. */
+.device-section {
+  margin-top: var(--sp-8);
 }
 
 /* --- layout helpers ------------------------------------------------------ */

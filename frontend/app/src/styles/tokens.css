@@ -45,6 +45,10 @@
   --rust: #a85b26;
   --rust-deep: #8c4a1f;
   --rust-track: #ddd8ca;
+  /* The tint `.unreadable` sits on, matching what `--alarm-ground` is to
+     `--alarm`. A status panel has to read the same on the paper ground and on a
+     plate, and a panel that borrowed `--surface` disappears on one of them. */
+  --rust-ground: rgba(168, 91, 38, 0.08);
 
   /* --- failure ------------------------------------------------------------ */
   --alarm: #8c3a26;
