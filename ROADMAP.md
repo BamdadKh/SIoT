@@ -543,6 +543,105 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 
 ---
 
+## Phase 10 — Device Notifications
+
+> **The number is not the order.** This depends on Phase 6 (records) and Phase 7 (dashboard)
+> and on nothing in Phases 8 or 9, so it can be built as soon as those two are done. It is
+> numbered 10 because renumbering would invalidate every "Phase 9" reference already in
+> `CLAUDE.md`, the design document and the code comments.
+
+A device raises an event its owner should see: a door opened, a tank is low, a battery is
+about to die. It arrives in the dashboard saying which device it came from, and the server
+learns nothing it did not already know.
+
+### 10.0 The three decisions this rests on
+
+Read these before ticking anything below. Each one is a place where the convenient design is
+the wrong one, and the reasons are not recoverable from the task list.
+
+**A notification is a record, not a new kind of thing.** It goes up through `POST /records`
+with the same Ed25519 signature, the same `seq` monotonicity, the same nonce construction, and
+the same three server checks from design 7.4. There is no notification endpoint, no
+notifications table, and no server-side schema change. That is not minimalism for its own
+sake: a second upload path is a second place for the checks to be subtly weaker, and "the
+alert path skipped the signature check because it needed to be fast" is exactly the kind of
+mistake this project's one rule exists to catch.
+
+**The record type stays inside the ciphertext, never on the wire.** Design 7.3's AAD carries a
+`record_type` byte, and `src/lib/wire-format.ts` currently pins it to the constant
+`RECORD_TYPE_V1 = 0` (see the 6.1 note for why it is a constant rather than a field). It is
+tempting to give notifications their own value there. **Do not.** The AAD is authenticated, not
+encrypted, so a distinct type in it tells the server "this upload is an alert" — and a smoke
+alarm, a door sensor or a panic button emitting a *distinguishable* record at a known moment is
+a labelled event log, which is precisely what Section 5.5 refuses to let device names become.
+The type goes in the encrypted CBOR payload beside the reading fields. The AAD keeps its
+constant.
+
+  The cost is real and has to be accepted, not worked around: **the server cannot tell a
+  notification from a temperature reading**, so it cannot selectively notify anyone. Delivery
+  is 10.4 and it is poll-based for that reason.
+
+**A symmetric key that can write can also read.** "Notification write key" implies a key that
+posts alerts without being able to read them back, and AES-GCM cannot do that: one key, both
+directions. This does not matter in v1, because the writer is always the device, and the device
+already holds `DEVICE_SECRET` and can derive every key in its own hierarchy — a write-only key
+would be a lock on a door it already has the key to. It starts to matter the moment the writer
+is *not* the device (a script, a webhook, a third-party service posting to someone's
+dashboard), and that needs asymmetric encryption to a per-device public key whose private half
+lives in the vault. Out of scope here, written down so it is a known boundary rather than a
+surprise discovered by someone building it.
+
+### 10.1 The notification key
+
+- [ ] Derive `device_notify_key` via HKDF from `DEVICE_SECRET`, info=`"siot/device/notify/v1"` — the third label alongside `"siot/device/data/v1"` and `"siot/device/sign/v1"` in `HKDF_INFO`, and like those two it is a wire format shared with every firmware port, not an internal name. Unique per device by construction, since `DEVICE_SECRET` is
+- [ ] Add it to `deriveDeviceKeys` in `frontend/lib/crypto/device.js` and to the ESP32 library's boot derivation, in the same commit — a label that exists on one side only is a device whose notifications nothing can open
+- [ ] Unit test: the notify key differs from the data key derived from the same secret, and both are reproducible
+
+> **Why a separate key at all, when `device_data_key` is right there.** Grants (design 9.3)
+> wrap one key to hand one device's data to another. With a single key per device, a grant is
+> all-or-nothing: sharing a door sensor's alerts means sharing its full open/close history.
+> Two keys make "alerts only" and "readings only" expressible. If Phase 8 is ever cut down to
+> a single grantable key, this separation loses its justification and should be revisited
+> rather than kept out of habit.
+
+### 10.2 Sending — device side
+
+- [ ] Extend the CBOR payload shape with a notification record: type marker, a short message, a severity from a fixed small set, and the device's own timestamp — all *inside* the encrypted payload
+- [ ] `siot.notify(severity, message)` in the ESP32 library, encrypting under `device_notify_key` and signing with the same Ed25519 key ordinary records use
+- [ ] Notifications and readings share one `seq` sequence, not two — `seq` feeds the nonce (design 7.2), and two counters over one key is nonce reuse waiting to happen. This is the single most dangerous thing to get wrong in this phase
+- [ ] Bound the message length in the library, not just in the UI: a device that can emit an arbitrarily long ciphertext lets its own payload size leak what it is saying
+- [ ] Test: a notification and a reading uploaded from one boot are accepted, in order, with no `seq` collision
+
+### 10.3 Reading — client side
+
+- [ ] Decrypt records with both `device_data_key` and `device_notify_key` and sort by the type marker inside the plaintext — a record that opens under neither is surfaced the way 6.3 surfaces a gap, as a signal rather than an error
+- [ ] Validate the decrypted notification against a strict allowlist before rendering, the same discipline 7.2 applies to schemas. The vault is authenticated and the record is signed, so this is not about tampering; it is that a device is a program someone wrote, and the dashboard renders whatever it says
+- [ ] Show which device each notification came from, by joining `DEVICE_ID` to the vault name through the existing `device-list.js` join — the server never learns the name, and a locked vault shows notifications attributed to a bare `DEVICE_ID`, the same honest degradation design 5.5 already accepts everywhere else
+- [ ] Order by `seq` within a device and by arrival time across devices, and say which is which — cross-device ordering uses the server's timestamps and is therefore only as trustworthy as the server
+
+### 10.4 Delivery and read state
+
+- [ ] v1 is **poll on open, and poll while open**. No push, no email, no SMS. Follows directly from 10.0: the server cannot tell a notification from a reading, so it has nothing to trigger on
+- [ ] Unread state lives in the **vault**, not the server — a per-device high-water `seq` of "seen up to here", marked read by an ordinary vault write with a version bump, exactly like a rename. "This account read the smoke alarm alert at 03:12" is not metadata to hand over in exchange for saving a round trip
+- [ ] Surface the count of unread notifications in the dashboard shell, derived client-side after decryption
+- [ ] Never phrase a quiet device as "no alerts": the same rule as liveness in 4.8. A withholding server and a device with nothing to say are indistinguishable from the client
+
+> **The push question, deliberately left open.** Real push is possible without breaking the one
+> rule, and it is worth knowing the shape before anyone reaches for the shape that does break
+> it. The server sends a **content-free** Web Push on *every* record arrival, for any device the
+> account owns; the client wakes, fetches, decrypts, and decides whether anything is worth
+> showing. That leaks nothing new, since the server already sees every upload land (design
+> 13.1). The cost is that a sensor reporting every thirty seconds wakes the client every thirty
+> seconds. The version that *is* forbidden, and that will look reasonable to whoever builds
+> this: letting the server push only when a notification arrives, which requires it to be able
+> to tell, which requires 10.0's second decision to be reversed.
+
+### 10.5 Sending from the dashboard (not v1)
+
+- [ ] Decide whether a notification can originate anywhere other than a device. If yes it needs the asymmetric scheme from 10.0's third decision, and that is a phase of its own rather than an item here
+
+---
+
 ## Suggested Starting Point
 
 Work top-to-bottom through **Phase 0 → Phase 1 → Phase 2**. That gets you: a real backend/frontend skeleton, real client-side crypto, and a working signup/login flow with genuine zero-knowledge properties — testable end-to-end before any device or vault-content work begins.
