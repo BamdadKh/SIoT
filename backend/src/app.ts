@@ -11,6 +11,7 @@ import { requireSession, sessionPlugin } from './lib/require-session.js';
 import { authRoutes } from './routes/auth.js';
 import { changePasswordRoutes } from './routes/change-password.js';
 import { deviceRoutes } from './routes/devices.js';
+import { deviceGrantRoutes, grantRoutes } from './routes/grants.js';
 import { healthRoutes } from './routes/health.js';
 import { recordRoutes } from './routes/records.js';
 import { sessionRoutes } from './routes/session.js';
@@ -97,6 +98,13 @@ export async function buildApp() {
   // ever checked.
   await app.register(recordRoutes);
 
+  // Public for the same reason: Device A's own firmware polls this for grants
+  // naming it as recipient (design 9.3), and it has no session either. The
+  // response is opaque ciphertext scoped by a 128-bit device_id, and design
+  // 13.1 already lists which devices hold grants on which others as metadata
+  // the server sees, so this adds no new leak.
+  await app.register(deviceGrantRoutes);
+
   // Authenticated: the hook belongs to this scope, so anything registered here
   // is protected by construction. New routes go inside unless there is a reason
   // they cannot — that way the easy mistake is a 401, not an open endpoint.
@@ -106,6 +114,7 @@ export async function buildApp() {
     await scope.register(vaultRoutes);
     await scope.register(changePasswordRoutes);
     await scope.register(deviceRoutes);
+    await scope.register(grantRoutes);
   });
 
   // Dev-only convenience: serve the plain-HTML test console from the API origin

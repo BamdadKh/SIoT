@@ -69,3 +69,11 @@ export const RECORD_TYPE_V1 = 0;
 /** `seq` is a uint64; 20 digits covers up to 2^64-1 with room to spare. */
 export const SEQ_MAX_DIGITS = 20;
 export const UINT64_MAX = (1n << 64n) - 1n;
+
+/**
+ * `iv(12) || AES-256-GCM(device_B_data_key)(32) || tag(16)`, design Section 9 —
+ * the same shape as `WRAPPED_VAULT_KEY_BYTES` because both wrap a 32-byte key,
+ * kept as its own constant since the two are unrelated wire values that would
+ * otherwise look coupled by accident.
+ */
+export const GRANT_BLOB_BYTES = 60;
