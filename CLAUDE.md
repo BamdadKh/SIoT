@@ -132,6 +132,17 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
 - **Fonts are self-hosted** via `@fontsource`, never Google Fonts. A zero-knowledge
   product that phones a third party on every page load is telling on its users for the
   sake of a stylesheet.
+- **A control sits in the text flow, and prose never trails after one.** The reference shape
+  is `SignIn`'s footer: a `.small` line whose *last* element is the control ("No account yet?
+  Create one"). A button wedged mid-sentence with text continuing after it reads as broken.
+  `.button-link` is `display: inline` for this reason: it inherits `display: flex` from
+  `.button`, which is invisible inside the `.row` footers (a flex item is blockified anyway)
+  and obviously wrong the moment one sits in a sentence.
+- **Status panels are one family: `.alarm`, `.success`, `.board-note`.** Same box metrics,
+  differing only in token. `.board-note` is the neutral member, for things that are neither
+  failures nor completions ("this board is blank", "added but not written to hardware"). It
+  takes the ground and rule of the input field, not `--paper` and `--line-strong`: a darker
+  block outlined in its own container's border colour reads as a hole cut in the plate.
 - **Design tokens are the whole palette** (`app/src/styles/tokens.css`); screens never
   hardcode a colour. The two accents are not interchangeable: `--olive` is every action the
   user can take, `--rust` is the mark (the wordmark and the registration ticks) plus work
@@ -177,6 +188,30 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   5.4, which cannot exist without a channel to the board. Other hardware is served by a
   published protocol (`docs/protocol.md`, Phase 4.7) plus a reveal button, not by a second
   guided flow.
+- **Credentials live in their own `siot` NVS partition, and its offset is load-bearing.**
+  `firmware/esp32-provisioning/partitions.csv` is the stock 4MB `default` table with one
+  partition inserted. A namespace in the stock `nvs` was rejected: the application owns that
+  partition, `nvs_flash_erase()` and a misaimed `Preferences.clear()` wipe all of it, and a
+  factory-reset routine is an ordinary thing for a sketch to have. Moving `siot` in a later
+  revision orphans every board already provisioned, since the bytes stay at the old address
+  and the new table looks past them. Append or grow spiffs' end; never shift it.
+- **The provisioning wire carries `DEVICE_SECRET` in one direction only.** There is no command
+  that reads it back, and adding one would turn every provisioned board into a secret
+  extractor for anyone who can reach the port. `WRITE` verifies itself by reading both values
+  back and comparing in RAM, reporting only whether they matched.
+- **`WRITE` is a compare-and-swap**, carrying the id the tool believes is on the board. Design
+  5.4 keeps the overwrite *decision* in the tool, which is right (only the tool has the vault
+  and can tell "your greenhouse sensor" from "not yours"). The swap is what makes it binding:
+  a board can be unplugged and another plugged in between the read and the write. Same shape
+  as the `vault_version` and `last_seq` swaps on the server.
+- **The serial transport uses one long-lived pump, never a read raced against a timeout.**
+  Racing `reader.read()` per exchange leaves the read outstanding when the timeout wins, and
+  it then eats the next chunk off the wire. That turns the handshake retry loop, which exists
+  to wait out the DTR/RTS auto-reset boot chatter, into a way to lose the board's answer.
+- **"Add it without one" is the non-ESP32 path, not just the no-board-to-hand path.** The
+  guided flow is deliberately one hardware target; everything else is served by the published
+  protocol plus a reveal. Copy that names only "no board to hand" tells every non-ESP32 user
+  the product is not for them.
 - **"Reveal credentials" is an escape hatch and must not be shaped like a path.** Reached by a
   deliberate action on an existing device, never offered during setup; reveals on demand and
   does not stay revealed; states its costs at the moment of revealing. Past that button the
@@ -461,6 +496,31 @@ open, not `--alarm`, which is for something the person did or can retry. `app/sr
 words liveness with no threshold and never as "offline"; a test asserts that absence rather than
 leaving it to review.
 
-The frontend suite is 81 `node --test` cases, up from 28. `device-list.js` and `last-seen.js`
-are React-free and crypto-free so the suite reaches them directly. The screens themselves are
-still uncovered, same gap as the rest of the client and all of `backend/`.
+**Phase 4.4 and 4.5 are done: provisioning reaches hardware.**
+`firmware/esp32-provisioning/` is a listener sketch that does nothing but take `DEVICE_ID` and
+`DEVICE_SECRET` over USB serial into the dedicated `siot` NVS partition. `AddDevice` now names,
+connects, checks the board and writes, in that order, and **checks the board before minting
+anything**, so a board that already belongs to another device costs nothing to discover. An
+occupied board is refused outright; there is no "write anyway". `provisioning-protocol.js` is
+the pure codec (22 tests), `web-serial.js` the transport (untestable, verified against a board).
+
+Verified on real hardware over COM6 with a throwaway PowerShell probe: 18 protocol cases, then
+a full recompile-and-upload plus hard reset after which `READ-ID` returned the same id, which
+is the claim design 5.3 rests on. **Not yet verified: the browser transport end to end.** The
+port chooser is a native dialog needing a human, so `frontend/app/serial-check.html` exists to
+close that gap by hand.
+
+`serial-check.html` and `stage-check.html`/`.jsx` are throwaway scaffolding (rule 4), marked as
+such. Delete both once `AddDevice` has been driven against a board.
+
+**Phase 10, device notifications, is in the roadmap and unbuilt.** Its three load-bearing
+decisions live in ROADMAP.md 10.0 and are the kind that get reversed by accident: a
+notification is an ordinary record on the ordinary path; the record type stays inside the
+ciphertext and never in the AAD (a distinguishable alert record is a labelled event log, and
+the accepted cost is that the server cannot trigger delivery); and a symmetric key that can
+write can also read, so "notification write key" cannot mean what it sounds like.
+
+The frontend suite is 103 `node --test` cases, up from 28. `device-list.js`, `last-seen.js` and
+`provisioning-protocol.js` are React-free and crypto-free so the suite reaches them directly.
+The screens themselves are still uncovered, same gap as the rest of the client and all of
+`backend/`.
