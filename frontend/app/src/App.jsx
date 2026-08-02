@@ -7,7 +7,17 @@ import { SignUp } from './screens/SignUp.jsx';
 import { Unlock } from './screens/Unlock.jsx';
 import { Devices } from './screens/Devices.jsx';
 import { AddDevice } from './screens/AddDevice.jsx';
+import { DeviceDetail } from './screens/DeviceDetail.jsx';
 import { ChangePassword } from './screens/ChangePassword.jsx';
+
+/**
+ * One device's own page. Singular, and that is not a typo: `/devices` is a
+ * server path and `API_PATHS` in vite.config.js matches by prefix, so
+ * `/devices/<id>` would be proxied to the backend on a reload and 404 rather
+ * than falling through to this shell. Same collision `/add-device` and
+ * `/password` already exist to avoid.
+ */
+const DEVICE_ROUTE = '/device/';
 
 /**
  * Which screen to show is decided by two independent facts, not one:
@@ -96,6 +106,22 @@ export function App() {
   if (path === '/add-device') {
     return (
       <AddDevice username={session.username} onSignOut={handleSignOut} signingOut={signingOut} />
+    );
+  }
+
+  if (path.startsWith(DEVICE_ROUTE)) {
+    // A `DEVICE_ID` is base64url, so nothing in it needs escaping and the
+    // segment is the id verbatim. A trailing slash is dropped rather than being
+    // treated as part of the identifier, since it comes from a person editing
+    // the address bar and means the same page.
+    const deviceId = path.slice(DEVICE_ROUTE.length).replace(/\/+$/, '');
+    return (
+      <DeviceDetail
+        username={session.username}
+        deviceId={deviceId}
+        onSignOut={handleSignOut}
+        signingOut={signingOut}
+      />
     );
   }
 

@@ -563,6 +563,23 @@ automatically, so a device delete was seq-scanning `grants`. Verified by hand wi
 probe, 20 checks (see the 4.9 roadmap note). The rest of 4.9 is `frontend/app/` and firmware:
 the per-device action surface, rename, the delete confirmation, and the optional `SIOT ERASE`.
 
+**Phase 4.9 has its per-device surface and rename, client-side.**
+`app/src/screens/DeviceDetail.jsx` at `/device/<DEVICE_ID>` (singular: `/devices` is a server
+path and `API_PATHS` matches by prefix, the same collision `/add-device` and `/password` exist
+to avoid). It uses the `TopBar` shell rather than a `Plate`, unlike `ChangePassword` and
+`AddDevice`, because those are one focused action each and this is the app's view of a thing
+that exists with several actions on it; it reads its own data, so the URL survives a reload.
+Rename is an ordinary vault write that re-reads immediately before writing, and shows the
+stored name back rather than what was typed. Three things came out of `Devices.jsx` on the way,
+each because the second copy is what forgets something: `lib/use-vault-devices.js` (the load,
+the join, and the rollback branch, carrying the vault `version` out with the document),
+`components/RollbackWarning.jsx`, and `components/DeviceStateNote.jsx` (whose wrapper class is
+a prop, since the same copy sits in `.device-note` on the list and in the status-panel family
+on a screen of its own). `.unreadable` is the fourth member of that family, in rust, with a new
+`--rust-ground` token. `lib/sequence.js` splits `last_seq` back into `boot_epoch` and
+`msg_counter`, always through `BigInt`. Delete, reveal (4.6) and the protocol doc (4.7) are
+still open. Not walked in a browser yet.
+
 **Phase 10, device notifications, is in the roadmap and unbuilt.** Its three load-bearing
 decisions live in ROADMAP.md 10.0 and are the kind that get reversed by accident: a
 notification is an ordinary record on the ordinary path; the record type stays inside the
@@ -570,7 +587,8 @@ ciphertext and never in the AAD (a distinguishable alert record is a labelled ev
 the accepted cost is that the server cannot trigger delivery); and a symmetric key that can
 write can also read, so "notification write key" cannot mean what it sounds like.
 
-The frontend suite is 103 `node --test` cases, up from 28. `device-list.js`, `last-seen.js` and
-`provisioning-protocol.js` are React-free and crypto-free so the suite reaches them directly.
+The frontend suite is 109 `node --test` cases, up from 28. `device-list.js`, `last-seen.js`,
+`sequence.js` and `provisioning-protocol.js` are React-free and crypto-free so the suite reaches
+them directly.
 The screens themselves are still uncovered, same gap as the rest of the client and all of
 `backend/`.

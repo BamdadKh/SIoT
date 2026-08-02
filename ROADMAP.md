@@ -426,13 +426,25 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > That is not the batching this item raises; it is the ordinary index a cascading foreign key
 > wants, cheap now and expensive to discover once the table is big enough to feel the scan.
 
-- [ ] A per-device surface for the actions, rather than more buttons on the list row. 4.6's
+- [x] A per-device surface for the actions, rather than more buttons on the list row. 4.6's
       reveal control needs the same home ("on an existing device, never a step in setup"), and
       three destructive-or-sensitive controls crowded into a row is how a stray click lands on
-      the wrong one. Same reasoning that moved sign-out into `AccountMenu`
-- [ ] Rename in the UI. `renameDevice` has existed in `vault-document.js` since 4.3 and
+      the wrong one. Same reasoning that moved sign-out into `AccountMenu` —
+      `app/src/screens/DeviceDetail.jsx` at `/device/<DEVICE_ID>`. **Singular, and that is not a
+      typo**: `/devices` is a server path and `API_PATHS` matches by prefix, so `/devices/<id>`
+      would be proxied to the backend on a reload, the same collision `/add-device` and
+      `/password` already exist to avoid. The `TopBar` shell rather than a `Plate`, unlike
+      `ChangePassword` and `AddDevice`: those are one focused action each, reached and left,
+      and this is the app's view of a thing that exists with several actions on it. It reads
+      its own vault and device list rather than being handed them, so the URL survives a reload
+- [x] Rename in the UI. `renameDevice` has existed in `vault-document.js` since 4.3 and
       nothing calls it, so the vault holds a name the person can set exactly once, during
-      setup, and never correct
+      setup, and never correct — a section on the device page, and an ordinary vault write:
+      same `PUT /vault`, same version bump, no endpoint. It re-reads the vault immediately
+      before writing rather than trusting the copy the screen loaded, the same discipline
+      `AddDevice` uses and for the same reason (a write on a stale version is a 409). The field
+      shows the stored name back after saving, not what was typed, because the crypto layer
+      normalises it
 - [ ] The delete confirmation names what it destroys, in the moment: the device's name, that
       every record it uploaded is being erased from the only place it exists, and that this
       cannot be undone by anything the person still holds. Shaped like the occupied-board
@@ -481,6 +493,43 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > and unregistered single-step paths, and killing the vault write after the server delete to
 > confirm the device lands in `UNREGISTERED`. No automated test either way; `backend/` still has
 > no harness, same gap as everything since 2.3.
+
+> **What the per-device surface pulled out of `Devices.jsx` on the way.** Three things that
+> were written for one screen and are now needed by two, and in each case the second copy is
+> the one that would have been written wrong:
+>
+> - `app/src/lib/use-vault-devices.js`, the load: `loadVault` and `GET /devices` in one
+>   `Promise.all`, the join, and the **rollback branch**. `loadVault` already makes a rollback
+>   impossible to ignore by throwing (3.2); this makes the handling of it impossible to write
+>   twice. It also carries the vault `version` out with the document rather than discarding it,
+>   since every vault edit is a compare-and-swap against the version it was read at.
+> - `components/RollbackWarning.jsx` and `components/DeviceStateNote.jsx`. The state notes take
+>   their wrapper class as a prop, because the same words sit in two grounds: inside the device
+>   list a note is `.device-note`, set into the ruled block it hangs from, and on a screen of
+>   its own it is a member of the `.alarm` / `.success` / `.board-note` status family. What
+>   must not differ between the two is the copy.
+> - `.unreadable`, the fourth member of that family, in rust. The orphan note needed one: on
+>   the device page there is no `.device-orphan` row to inherit the rust rule from, and
+>   `--paper` on the paper ground is invisible. New token `--rust-ground`, matching what
+>   `--alarm-ground` is to `--alarm`, so the panel reads the same on a plate and on the page.
+>
+> `app/src/lib/sequence.js` is new rather than moved: `last_seq` is a bare uint64 and says
+> nothing to a reader until it is split back into `boot_epoch` and `msg_counter`. Always
+> `BigInt`, never `Number` (the value leaves the safe integer range once `boot_epoch` passes
+> 2^21, and the failure is silent rounding), and it is deliberately worded "boot 3, message
+> 412" rather than "412 records": whether a boot's first record carries counter 0 or 1 is the
+> firmware's business, so the phrasing claims only what the number actually says. Six tests,
+> and the suite is 109, up from 103.
+>
+> The device name in the list is now the link to its page, in the ordinary link appearance
+> CLAUDE.md pins down: olive, 600, underlined on hover. A device name is the one thing on the
+> row a person came looking for, so it is the thing to press, and a separate "Open" control
+> beside it would be a second appearance for the same navigation.
+>
+> **Not verified in a browser.** The suite passes and the client builds, but the screens
+> themselves are uncovered as always, and the Chrome session available to this pass dropped
+> before the flow could be walked. Hand test: sign in, unlock, open a device, rename it,
+> reload.
 
 ---
 
