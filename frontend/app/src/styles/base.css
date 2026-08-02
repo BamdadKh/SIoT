@@ -275,6 +275,12 @@ a:hover {
 }
 
 .button-link {
+  /* `.button` is `display: flex`, and inheriting that here made every
+     `.button-link` a block: fine inside the `.row` footers, where a flex item is
+     blockified anyway, and visibly broken inside a sentence, where the control
+     dropped onto its own line and split the text around it. A link-shaped
+     control has to sit in the text flow like the link it is dressed as. */
+  display: inline;
   height: auto;
   width: auto;
   padding: 0;
@@ -512,17 +518,22 @@ a:hover {
 
 /* --- provisioning -------------------------------------------------------- */
 
-/* A statement of fact about the board or the outcome, in the shape of `.alarm`
-   and `.success` but in neither of their colours. "This board is blank" and
-   "added, but not written to hardware" are neither failures nor completions, and
-   dressing them as either would be the screen taking a position it does not
-   have. Ruled and ink-coloured: the same panel, saying only what is true. */
+/* A statement of fact about the board or the outcome. "This board is blank" and
+   "added, but not written to hardware" are neither failures nor completions, so
+   this is the third member of the `.alarm` / `.success` family rather than a
+   shape of its own: identical box metrics, neutral tokens.
+
+   The first pass got that wrong and it showed. It used `--paper`, the page
+   ground, inside a plate that is `--surface`, with `--line-strong`, the plate's
+   own border colour. A darker slab ruled in the container's own border reads as
+   a hole cut in the panel. Here it takes the ground and the rule of the input
+   field directly above it, so it reads as part of the form it belongs to. */
 .board-note {
-  border: 1px solid var(--line-strong);
-  background: var(--paper);
+  border: 1px solid var(--line);
+  background: var(--surface-input);
   color: var(--ink-muted);
   font-size: var(--size-small);
-  line-height: 1.55;
+  line-height: 1.5;
   padding: 10px var(--sp-3);
   margin: 0;
 }

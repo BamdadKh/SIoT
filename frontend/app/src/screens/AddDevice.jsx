@@ -303,8 +303,8 @@ function NamingStage({ named, busy, serialSupported, onSkip }) {
       </div>
 
       {serialSupported ? (
-        <p className="small" style={{ marginTop: 'var(--sp-4)' }}>
-          No board to hand?{' '}
+        <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
+          Not an ESP32, or no board to hand?{' '}
           <button
             className="button button-link"
             type="button"
@@ -312,8 +312,7 @@ function NamingStage({ named, busy, serialSupported, onSkip }) {
             disabled={!named || Boolean(busy)}
           >
             Add it without one
-          </button>{' '}
-          and write the credentials later.
+          </button>
         </p>
       ) : null}
     </>
@@ -353,11 +352,12 @@ function BoardStage({ board, busy, onDisconnect }) {
               </>
             )}
             . Writing over it would leave that device reporting under credentials nothing can
-            decrypt, permanently. Nothing has been changed.
+            decrypt, permanently. Nothing has been changed. Use a different board, or
+            re-provision that device from its own entry in Devices.
           </p>
         </div>
-        <p className="small" style={{ marginTop: 'var(--sp-4)' }}>
-          Use a different board, or re-provision that device from its own entry in Devices.{' '}
+        <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
+          Finished with this board?{' '}
           <button
             className="button button-link"
             type="button"
@@ -385,7 +385,8 @@ function BoardStage({ board, busy, onDisconnect }) {
         </SubmitButton>
       </div>
 
-      <p className="small" style={{ marginTop: 'var(--sp-4)' }}>
+      <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
+        Wrong board?{' '}
         <button
           className="button button-link"
           type="button"
@@ -393,8 +394,7 @@ function BoardStage({ board, busy, onDisconnect }) {
           disabled={Boolean(busy)}
         >
           Disconnect
-        </button>{' '}
-        without writing.
+        </button>
       </p>
     </>
   );
@@ -409,9 +409,10 @@ function DoneStage({ done }) {
     </div>
   ) : (
     <div className="board-note" style={{ marginTop: 'var(--sp-5)' }} role="status">
-      <strong>{done.name}</strong> is in your vault and registered, but its credentials have not
-      reached any hardware. It will show in Devices as never having reported until you provision
-      a board for it.
+      <strong>{done.name}</strong> is in your vault and registered. Its credentials have not
+      reached any hardware yet, so it will show in Devices as never having reported. Provision an
+      ESP32 from this page when you have one to hand, or, for other hardware, read the
+      credentials out once revealing them is built.
     </div>
   );
 }
