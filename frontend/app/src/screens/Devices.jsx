@@ -1,71 +1,75 @@
-import { useEffect, useState } from 'react';
-import { decryptVault, fromBase64Url } from '@siot/crypto';
-import { fetchVault } from '../lib/api.js';
-import { getVaultKey } from '../lib/keyring.js';
-import { getHighWaterMark, setHighWaterMark } from '../lib/vault-version-store.js';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  deriveDeviceKeys,
+  deviceSecretBytes,
+  listDevices,
+  toBase64Url,
+} from '@siot/crypto';
+import { ApiError, fetchDevices, registerDevice } from '../lib/api.js';
+import { loadVault, VaultRollbackError } from '../lib/vault-store.js';
+import { joinDevices, shortDeviceId, ORPHAN, UNREGISTERED } from '../lib/device-list.js';
+import { describeLastSeen, exactLastSeen } from '../lib/last-seen.js';
+import { Link } from '../lib/router.jsx';
 import { TopBar } from '../components/TopBar.jsx';
 
 /**
- * The signed-in, unlocked home.
+ * The signed-in, unlocked home: every device, named from the vault and dated
+ * from the server (roadmap 4.8).
  *
- * There is no "Add device" control yet on purpose: pairing is Phase 4 and a
- * button that leads nowhere is worse than none. The empty state says what the
- * next step will be, and the control lands beside the heading when it works.
+ * Two fetches that neither side could do alone. The vault has names and secrets
+ * the server has never seen; the server has arrival times the vault cannot know.
+ * `joinDevices` puts them together by `DEVICE_ID` and surfaces the two ways they
+ * can disagree, both of which are real states rather than error handling.
  *
- * The copy names the one supported flow (design 5.3): plug an ESP32 in and the
- * browser writes its credentials over Web Serial. It deliberately does not
- * mention revealing credentials for other hardware; that is an escape hatch
- * reached from a device that already exists (5.3.1), and an empty state is
- * exactly where it would get mistaken for a second way to start.
- *
- * Once 4.8 lands this stops being the only thing on the screen: devices appear
- * here with the name their owner gave them (which lives in the vault, never on
- * the server) and when each was last heard from.
- *
- * On mount it does the roadmap 3.2 rollback check: fetch the vault, compare its
- * version against the IndexedDB high-water mark, and refuse to go further if
- * the server just handed back something older than what this browser has
- * already seen. That is the one class of tampering neither the AAD nor the
- * plaintext envelope in `vault.js` can catch on their own: both are satisfied
- * by an old blob that is *honestly* labelled with its own old version.
+ * On mount it still does the roadmap 3.2 rollback check, now inside `loadVault`
+ * rather than inline here, since `AddDevice` needs the identical check and the
+ * one that gets written second is the one that forgets it.
  */
 export function Devices({ username, onSignOut, signingOut }) {
-  const [vault, setVault] = useState({ status: 'checking' });
+  const [state, setState] = useState({ status: 'checking' });
+
+  // `load` is called both on mount and again after a device is registered from
+  // the list, so the mounted check is a ref rather than the usual effect-local
+  // flag: the second caller outlives the effect that created it.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const load = useCallback(async () => {
+    try {
+      const [{ document, dropped }, { devices: registered }] = await Promise.all([
+        loadVault(username),
+        fetchDevices(),
+      ]);
+      if (!mounted.current) return;
+
+      setState({
+        status: 'ok',
+        devices: joinDevices(listDevices(document), registered),
+        vaultDocument: document,
+        dropped,
+      });
+    } catch (err) {
+      if (!mounted.current) return;
+      if (err instanceof VaultRollbackError) {
+        setState({
+          status: 'rollback',
+          serverVersion: err.serverVersion,
+          cached: err.cachedVersion,
+        });
+        return;
+      }
+      setState({ status: 'error', message: err.message });
+    }
+  }, [username]);
 
   useEffect(() => {
-    let live = true;
-
-    (async () => {
-      try {
-        const vaultKey = getVaultKey();
-        const [{ vault_version: serverVersion, ciphertext }, cached] = await Promise.all([
-          fetchVault(),
-          getHighWaterMark(username),
-        ]);
-
-        if (serverVersion < cached) {
-          if (live) setVault({ status: 'rollback', serverVersion, cached });
-          return;
-        }
-
-        // Confirms the blob actually opens under this version before trusting
-        // it enough to raise the high-water mark. A never-written vault has no
-        // blob to check and version 0, which cannot regress anything.
-        if (ciphertext !== null) {
-          await decryptVault(fromBase64Url(ciphertext), vaultKey, serverVersion);
-        }
-
-        await setHighWaterMark(username, serverVersion);
-        if (live) setVault({ status: 'ok' });
-      } catch (err) {
-        if (live) setVault({ status: 'error', message: err.message });
-      }
-    })();
-
-    return () => {
-      live = false;
-    };
-  }, [username]);
+    load();
+  }, [load]);
 
   return (
     <>
@@ -73,9 +77,14 @@ export function Devices({ username, onSignOut, signingOut }) {
       <main className="page">
         <div className="page-head">
           <h1 className="h2">Devices</h1>
+          {state.status === 'ok' ? (
+            <Link to="/add-device" className="button button-inline">
+              Add device
+            </Link>
+          ) : null}
         </div>
 
-        {vault.status === 'rollback' ? (
+        {state.status === 'rollback' ? (
           <section className="rollback-warning">
             <span className="tick tick-tl" />
             <span className="tick tick-tr" />
@@ -84,8 +93,8 @@ export function Devices({ username, onSignOut, signingOut }) {
             <h2 className="h3">This vault went backwards</h2>
             <p className="prose" style={{ marginTop: 'var(--sp-3)' }}>
               The server just returned vault version{' '}
-              <span className="mono">{vault.serverVersion}</span>, but this browser has already
-              seen version <span className="mono">{vault.cached}</span>. That can only happen if
+              <span className="mono">{state.serverVersion}</span>, but this browser has already
+              seen version <span className="mono">{state.cached}</span>. That can only happen if
               the server served an old copy of your vault, either by mistake or on purpose.
               Nothing has been decrypted or trusted.
             </p>
@@ -96,23 +105,141 @@ export function Devices({ username, onSignOut, signingOut }) {
           </section>
         ) : null}
 
-        {vault.status === 'error' ? (
+        {state.status === 'error' ? (
           <p className="alarm" role="alert">
-            Could not check the vault: {vault.message}
+            Could not check the vault: {state.message}
           </p>
         ) : null}
 
-        {vault.status === 'ok' ? (
+        {state.status === 'ok' && state.dropped > 0 ? (
+          <p className="alarm" style={{ marginBottom: 'var(--sp-4)' }} role="alert">
+            {state.dropped} {state.dropped === 1 ? 'entry' : 'entries'} in your vault could not be
+            read and {state.dropped === 1 ? 'was' : 'were'} skipped. The vault itself is intact and
+            authentic, so this is a fault in the client that wrote {state.dropped === 1 ? 'it' : 'them'},
+            not tampering.
+          </p>
+        ) : null}
+
+        {state.status === 'ok' && state.devices.length === 0 ? (
           <section className="slot">
             <span className="tick tick-tl" />
             <span className="tick tick-tr" />
             <span className="tick tick-bl" />
             <span className="tick tick-br" />
             <h2 className="h3">No devices yet</h2>
-            <p className="prose">Plug an ESP32 in over USB to set one up.</p>
+            <p className="prose">Name one and this browser will mint its keys locally.</p>
           </section>
+        ) : null}
+
+        {state.status === 'ok' && state.devices.length > 0 ? (
+          <ul className="device-list">
+            {state.devices.map((device) => (
+              <DeviceRow
+                key={device.id}
+                device={device}
+                vaultDocument={state.vaultDocument}
+                onRegistered={load}
+              />
+            ))}
+          </ul>
         ) : null}
       </main>
     </>
+  );
+}
+
+/**
+ * One device.
+ *
+ * The liveness line never says "offline". The client knows it has not received a
+ * record, not why: a withholding server and a flat battery look identical from
+ * here, and the server cannot forge a newer record at a higher `seq` but can
+ * always withhold one. So the honest claim is when something last arrived.
+ */
+function DeviceRow({ device, vaultDocument, onRegistered }) {
+  return (
+    <li className={`device${device.state === ORPHAN ? ' device-orphan' : ''}`}>
+      <div className="device-identity">
+        {device.name ? (
+          <h2 className="h3">{device.name}</h2>
+        ) : (
+          <h2 className="h3 device-nameless">Unnamed device</h2>
+        )}
+        <span className="mono" title={device.id}>
+          {shortDeviceId(device.id)}
+        </span>
+      </div>
+
+      <div className="device-liveness">
+        <span className="small" title={exactLastSeen(device.lastSeenAt)}>
+          {device.state === UNREGISTERED ? 'Not registered' : describeLastSeen(device.lastSeenAt)}
+        </span>
+      </div>
+
+      {device.state === UNREGISTERED ? (
+        <UnregisteredNote device={device} vaultDocument={vaultDocument} onRegistered={onRegistered} />
+      ) : null}
+
+      {device.state === ORPHAN ? (
+        <p className="device-note">
+          The server has this device registered, but your vault has no record of it, so its{' '}
+          <span className="mono">DEVICE_SECRET</span> is gone. Nothing it has uploaded or will
+          upload can be decrypted. Set up a replacement and stop using this one.
+        </p>
+      ) : null}
+    </li>
+  );
+}
+
+/**
+ * The recoverable half of a half-finished add: the vault has the secret, the
+ * server never got the public key. Registering again with the same `DEVICE_ID`
+ * is all that is missing, and the public key is re-derived here rather than
+ * stored, because it always was derived rather than stored.
+ */
+function UnregisteredNote({ device, vaultDocument, onRegistered }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function handleRegister() {
+    setBusy(true);
+    setError(null);
+
+    let secret = null;
+    try {
+      const entry = listDevices(vaultDocument).find((candidate) => candidate.id === device.id);
+      if (!entry) throw new Error('this device is no longer in the vault');
+
+      secret = deviceSecretBytes(entry);
+      const { dataKey, signPub } = await deriveDeviceKeys(secret);
+      dataKey.fill(0);
+
+      await registerDevice({ device_id: device.id, sign_pub: toBase64Url(signPub) });
+      await onRegistered();
+    } catch (failure) {
+      setError(
+        failure instanceof ApiError && failure.status === 409
+          ? 'That identifier is registered to a different account. Set up a replacement device.'
+          : (failure?.message ?? 'Could not register the device.'),
+      );
+      setBusy(false);
+    } finally {
+      secret?.fill(0);
+    }
+  }
+
+  return (
+    <div className="device-note">
+      <p style={{ margin: 0 }}>
+        This device is in your vault but the server has never heard of it, so it cannot upload
+        anything. Its secret is safe: registering again is all that is missing.
+      </p>
+      <div className="row" style={{ gap: 'var(--sp-4)', marginTop: 'var(--sp-3)' }}>
+        <button className="button button-inline" type="button" onClick={handleRegister} disabled={busy}>
+          {busy ? 'Registering' : 'Finish registering'}
+        </button>
+        {error ? <span className="small device-note-error">{error}</span> : null}
+      </div>
+    </div>
   );
 }

@@ -243,13 +243,19 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 - [x] Include the user's **name** for the device in that entry (design 5.5) — the name lives in the vault and nowhere else; there is no `name` column on `devices` and adding one would be wrong. A test asserts the name does not appear in the sealed blob's bytes
 - [x] Ask for the name during setup, before the device exists, so nothing is ever displayed as a bare `DEVICE_ID` — enforced at the data layer: `addDevice` takes the name as a required argument, so there is no way to write an unnamed entry and label it later
 - [x] Rename is just a vault write — same `PUT /vault` path, same version bump, no new endpoint. `renameDevice` touches the name and nothing else, so it survives a re-provisioning (design 8.4) unchanged
-- [ ] Re-save vault via existing `PUT /vault` path (bump version)
+- [x] Re-save vault via existing `PUT /vault` path (bump version) — `saveVault` in
+      `app/src/lib/api.js`, called through `storeVault` in `app/src/lib/vault-store.js`.
+      The read and the write are one module rather than two API calls a screen makes,
+      because the rollback check from 3.2 has to sit on the read path and a second caller
+      is exactly what forgets it: `loadVault` throws `VaultRollbackError` rather than
+      returning a flag, so there is no branch to leave unwritten, only a `catch` to leave
+      unhandled, which fails loudly on screen instead of quietly in the data. The
+      high-water mark is raised only after the blob has actually opened at the version the
+      server claimed; a version that arrived with a blob that will not decrypt is not
+      evidence of anything and caching it would poison the cache against the real vault
 
-> **Unticked deliberately: nothing calls `PUT /vault` from the React client yet.** The
-> document layer is complete and unit tested, but the write is the second half of the
-> provisioning flow (4.4) and lands with it, along with `saveVault` in `app/src/lib/api.js`
-> and `/vault` gaining `PUT` in the proxy list. The test console already exercises the
-> endpoint, so this is a client wiring gap, not an untested path.
+> Superseded: the note that used to sit here said nothing called `PUT /vault` from the
+> React client. `AddDevice` does now, which is what closed the item.
 
 > Two design decisions this pass made that the item did not anticipate. **Every function
 > returns a new document rather than mutating one**, because `PUT /vault` can lose its
@@ -275,6 +281,32 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 - [ ] Basic page: "Connect device" button using Web Serial API (`navigator.serial.requestPort`)
 - [ ] Handle browser support check (Web Serial is Chromium-only — surface a clear message that names the reveal path in 4.6 rather than dead-ending)
 - [ ] UI flow: name the device → connect to board → write
+
+> **The screen exists and stops short of the board.** `app/src/screens/AddDevice.jsx`, at
+> `/add-device`, does design 5.3's steps 1 to 3: mint `DEVICE_ID`/`DEVICE_SECRET`, seal them
+> into the vault, register the public half. Step 4, the Web Serial write to NVS, is 4.5 and
+> cannot be built or exercised until the provisioning sketch exists, so the three items above
+> stay open. The completion state says plainly that the credentials have not reached any
+> hardware rather than implying a device is ready; when 4.5 lands, "Connect device" follows
+> the step that is there and that sentence comes out.
+>
+> **The write order deviates from design 5.3, and it is about which half-completed state a
+> person can be left holding.** 5.3 registers (step 2) before the vault write (step 3).
+> Register first and let the vault write fail and the server holds a `DEVICE_ID` and a signing
+> key whose `DEVICE_SECRET` only ever existed in that tab's memory: the id is burned and shows
+> as an orphan (design 5.4) forever. Vault first and let registration fail and the secret is
+> safely stored, the same id can be registered again, and the device list offers exactly that
+> button. One order is recoverable and the other is not, so the vault write goes first.
+>
+> The screen re-reads the vault immediately before writing rather than trusting what the list
+> already had. A write built on a stale version is a 409, and a 409 here costs a freshly minted
+> `DEVICE_SECRET` to recover from.
+>
+> The name is asked for first and is not optional, which is design 5.5 taken literally: there
+> is no moment at which a device exists as a bare `DEVICE_ID` waiting to be labelled. `addDevice`
+> in the crypto layer already enforces that, so the screen is a friendlier place to say it and
+> not the only place it holds. The confirmation echoes the name read back out of the document,
+> not the input, since the crypto layer normalises it.
 
 ### 4.5 Web Serial provisioning tool — NVS write protocol
 - [ ] Define simple serial command protocol for the tool ↔ ESP32 bootstrap sketch (e.g. `READ_ID`, `WRITE_CREDS`)
@@ -310,14 +342,16 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 ### 4.8 Device list — names and liveness
 - [x] Route `GET /devices` (authenticated): the metadata the server legitimately holds per device — `device_id`, `last_seq`, and when its newest record arrived. No names, because it has none — `src/routes/devices.ts`, scoped to `owner_user_id = req.session.userId`
 - [x] Decide how last-seen is stored: `max(created_at)` over `records`, or a `last_seen_at` column on `devices` updated alongside `last_seq` in the Phase 6 insert. **Chosen: the column** (migration `1785626993678_devices-last-seen.js`) — `records` has no per-device covering index that makes `max()` cheap once a device has years of history, and `last_seq` already lives on `devices` for the identical reason. Nothing writes it yet; that lands with the Phase 6 insert, so every device currently reads back `last_seen_at: null`, which is correct until then
-- [ ] Client: join the server's list against the vault's device records by `DEVICE_ID`, so names come from the vault and liveness from the server
-- [ ] Show **when it was last heard from**, not just a dot (design 5.6) — devices report on wildly different schedules and a fixed threshold will call a healthy hourly sensor dead
-- [ ] Never phrase "offline" as a fact about the device: the client knows it has not received a record, not why. A withholding server is indistinguishable from a flat battery
-- [ ] Handle the two mismatch cases visibly: a device in the vault the server does not know, and a device the server reports that the vault has no record for (an orphan — see design 5.4)
+- [x] Client: join the server's list against the vault's device records by `DEVICE_ID`, so names come from the vault and liveness from the server — `app/src/lib/device-list.js`, called from `Devices.jsx` after one `Promise.all` over `loadVault` and `GET /devices`. The join key is `DEVICE_ID` and nothing else: names are not identifiers, are not unique, and two devices called "sensor" are the user's business rather than a constraint violation. Vault order is kept rather than the server's, since that is the order the person added them in and the server's (creation time) would silently disagree
+- [x] Show **when it was last heard from**, not just a dot (design 5.6) — `app/src/lib/last-seen.js`. No threshold anywhere: a sensor that wakes hourly is healthy at 59 minutes and a doorbell is not, so a timestamp lets the person who chose the reporting interval be the one who judges it. Relative phrasing on the row, the exact timestamp in its `title`. A record dated in the future (a server clock running ahead) is named as that rather than rendered as "in 3 minutes", which would read like a schedule
+- [x] Never phrase "offline" as a fact about the device: the client knows it has not received a record, not why. A withholding server is indistinguishable from a flat battery — held by a test that asserts the absence rather than by review: every gap from a minute to two and a half years produces a "Last record ..." sentence and none of them matches `offline|dead|down|unreachable|inactive`
+- [x] Handle the two mismatch cases visibly: a device in the vault the server does not know, and a device the server reports that the vault has no record for (an orphan — see design 5.4) — three states, `PAIRED`/`UNREGISTERED`/`ORPHAN`, and the two mismatches are worded by what can be done about them rather than by severity. An unregistered device is recoverable (the secret is in the vault, the same id can be registered again) and gets a "Finish registering" button that re-derives `sign_pub` from the stored secret, since the public key always was derived rather than stored. An orphan is not recoverable at all: the `DEVICE_SECRET` is gone, so everything that device has uploaded or will upload is permanently unreadable, and it is styled rust, the token reserved for a vault that will not open, rather than `--alarm`, which is for something the person did or can retry
 
-> The four unticked items above are all `frontend/app/` UI and are deliberately left for a
-> session that touches the frontend (also gated by the CLAUDE.md rule that new UI is
-> Opus-only). The server side of 4.8 is complete and independently testable via `GET /devices`.
+> `device-list.js` and `last-seen.js` deliberately contain no crypto and no React, so
+> `node --test` covers them directly: the three join outcomes are tedious to reproduce by hand
+> (an orphan needs a vault entry deleted out from under a registered device) and easy to get
+> subtly wrong. 17 new cases, and the suite is 81, up from 65. That is still not a test of the
+> screens; `Devices.jsx` itself is uncovered, same gap as the rest of the client.
 
 ---
 

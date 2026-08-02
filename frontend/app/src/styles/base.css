@@ -263,6 +263,17 @@ a:hover {
    an unused shape in the shared sheet is the thing a later screen copies by
    accident because it was there. */
 
+/* The same control, sized to its label instead of its column. `.button` is
+   full-width because it is the one thing a form plate is asking for; a button
+   sitting beside a heading or inside a row is not, and stretching it there would
+   make a secondary action look like the primary one. */
+.button-inline {
+  width: auto;
+  height: 34px;
+  padding: 0 var(--sp-4);
+  font-size: var(--size-small);
+}
+
 .button-link {
   height: auto;
   width: auto;
@@ -497,6 +508,87 @@ a:hover {
   align-items: center;
   gap: var(--sp-3);
   text-align: center;
+}
+
+/* --- device list --------------------------------------------------------- */
+
+/* One ruled block rather than a card per device. A device list is a register of
+   what exists, and separate cards would set every row floating on the ground as
+   though each were its own plate. The outer border is `--line-strong` to match
+   `.slot`; the rules between rows are the lighter `--line`, so the block reads
+   as one thing subdivided rather than as several stacked. */
+.device-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+/* Two columns: what it is on the left, when it was last heard from on the
+   right. Notes span both, underneath, because they are about the row rather
+   than about either column. */
+.device {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--sp-2) var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.device + .device {
+  border-top: 1px solid var(--line);
+}
+
+.device-identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+/* A name is 64 characters of the user's choosing and can be one unbroken run of
+   them; it wraps rather than pushing the liveness column off the plate. */
+.device-identity .h3 {
+  overflow-wrap: anywhere;
+}
+
+/* An orphan has no name to show, and "Unnamed device" is the client saying so
+   rather than a label anyone chose. Faint, so it reads as absence. */
+.device-nameless {
+  color: var(--ink-faint);
+}
+
+.device-liveness {
+  justify-self: end;
+  text-align: right;
+}
+
+/* Set into the ground rather than raised off it: a note is subordinate to the
+   row it hangs from, and a second surface colour here would compete with the
+   block itself. The left rule is what carries the distinction below. */
+.device-note {
+  grid-column: 1 / -1;
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--paper);
+  border-left: 2px solid var(--line-strong);
+  font-size: var(--size-small);
+  line-height: 1.55;
+  color: var(--ink-muted);
+}
+
+/* An orphan is rust, the same token as a vault that will not open, and for the
+   same reason: the `DEVICE_SECRET` is gone, so the records are unreadable for
+   good. Not `--alarm`, which is for something the person did or can retry, and
+   not olive, which would offer an action there isn't one of. */
+.device-orphan .device-note {
+  border-left-color: var(--rust);
+  color: var(--rust-deep);
+}
+
+.device-note-error {
+  color: var(--alarm);
 }
 
 /* --- layout helpers ------------------------------------------------------ */
