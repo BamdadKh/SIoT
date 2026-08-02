@@ -313,16 +313,19 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 - [x] Implement actual write of `DEVICE_ID` + `DEVICE_SECRET` to dedicated NVS partition — `partitions.csv`, a superset of the stock 4MB `default` table with `siot` inserted. A namespace in the stock `nvs` was rejected: the application owns that partition, `nvs_flash_erase()` and a misaimed `Preferences.clear()` wipe all of it, and a factory-reset routine is an ordinary thing for a sketch to have. The write reads both values back and compares in RAM before answering `OK`, so success means the bytes are in flash rather than that an API call returned
 - [x] Test round-trip on a real ESP32: provision, power cycle, re-read confirms values persisted — done harder than the item asks. A throwaway PowerShell probe over COM6 covering 18 cases (handshake; blank board reads as `-`; write; read-back; a blank expectation going stale once an id is present; a wrong expectation refused *and storage confirmed unchanged after it*; re-provisioning the same id; rotating to a new one; short, non-alphabet and non-canonical values rejected; missing and extra arguments rejected; unknown command rejected). Then a **full recompile-and-upload followed by a hard reset**, after which `READ-ID` returned the same id: a stronger claim than a power cycle, since it is the one design 5.3 actually rests on
 
-> **Not verified: the browser transport end to end.** `provisioning-protocol.js` has 22
-> `node --test` cases and the sketch has the 18-case hardware probe above, but
-> `app/src/lib/web-serial.js` between them has been exercised only as far as the port chooser.
-> `navigator.serial` has no shim worth trusting and the chooser is a native dialog that needs a
-> human to pick a port, so this cannot be automated from here. `frontend/app/serial-check.html`
-> is throwaway scaffolding for closing that gap: read-only, `READ-ID` twice so a reader left
-> holding a stolen chunk would show up, and no path in it that writes. **Delete it once
-> `AddDevice` has been driven against a board by hand.**
+> **The browser transport is verified too.** `provisioning-protocol.js` has 22 `node --test`
+> cases and the sketch has the 18-case hardware probe above; `web-serial.js` sits between them
+> and can never have either, since `navigator.serial` has no shim worth trusting and the port
+> chooser is a native dialog that needs a human. Closed by hand with a throwaway read-only page
+> (`serial-check.html`, since deleted): handshake in 26 ms, then `READ-ID` twice returning the
+> same id the hardware probe had left on the board. Twice on purpose, because a reader left
+> holding a stolen chunk would show up on the second exchange and not the first.
 >
-> One thing that page exists to catch, because it was a real bug and not a hypothetical: the
+> Still unverified: **`AddDevice`'s own write path end to end**, meaning mint, vault, register,
+> board, in one run. It needs a signed-in session and an unlocked vault, which neither harness
+> could provide, so it is a hand test rather than a gap in the code.
+>
+> One thing that page existed to catch, because it was a real bug and not a hypothetical: the
 > obvious way to write the transport is to race `reader.read()` against a timeout inside each
 > exchange, and it is quietly wrong. When the timeout wins the read is still outstanding, and it
 > consumes the next chunk off the wire and drops it. That turns the handshake's retry loop, the

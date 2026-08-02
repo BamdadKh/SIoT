@@ -301,6 +301,28 @@ a:hover {
   text-underline-offset: 2px;
 }
 
+/* The same control, for a secondary action sitting directly under a primary
+   button rather than in a footer.
+
+   `.button-link` at full weight works below a rule, where it is the only olive
+   thing in its zone. Stacked immediately under a full-width olive button it
+   reads as a highlight dropped into the middle of a sentence, and two olive
+   controls in a column compete over which one is the thing to press. It stays
+   olive, because the token rule is not negotiable and this is an action; what
+   changes is that the affordance moves from weight to the underline, so the line
+   reads as one sentence with a word you can click. */
+.button-link-quiet {
+  font-weight: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.button-link-quiet:disabled {
+  color: var(--ink-faint);
+  cursor: default;
+}
+
 /* --- work in progress ---------------------------------------------------- */
 
 /*

@@ -138,6 +138,14 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   `.button-link` is `display: inline` for this reason: it inherits `display: flex` from
   `.button`, which is invisible inside the `.row` footers (a flex item is blockified anyway)
   and obviously wrong the moment one sits in a sentence.
+- **A link inside a sentence takes `.button-link-quiet`; a link in a footer does not.**
+  `.button-link`'s 600 weight is right where it is the only olive thing in its zone, below a
+  rule. Stacked directly under a full-width olive button it reads as a highlight dropped into
+  the middle of a sentence, and two olive controls in a column argue about which is the thing
+  to press. The quiet variant keeps olive, because the token rule is not negotiable and this is
+  an action, and moves the affordance from weight to an underline. Two link weights on one
+  screen is the point, not an inconsistency: standalone controls and words inside a sentence
+  are different contexts.
 - **Status panels are one family: `.alarm`, `.success`, `.board-note`.** Same box metrics,
   differing only in token. `.board-note` is the neutral member, for things that are neither
   failures nor completions ("this board is blank", "added but not written to hardware"). It
@@ -506,12 +514,16 @@ the pure codec (22 tests), `web-serial.js` the transport (untestable, verified a
 
 Verified on real hardware over COM6 with a throwaway PowerShell probe: 18 protocol cases, then
 a full recompile-and-upload plus hard reset after which `READ-ID` returned the same id, which
-is the claim design 5.3 rests on. **Not yet verified: the browser transport end to end.** The
-port chooser is a native dialog needing a human, so `frontend/app/serial-check.html` exists to
-close that gap by hand.
+is the claim design 5.3 rests on. The browser transport is confirmed too, by hand through a
+read-only page (since deleted): handshake in 26 ms, `READ-ID` twice returning the same id.
 
-`serial-check.html` and `stage-check.html`/`.jsx` are throwaway scaffolding (rule 4), marked as
-such. Delete both once `AddDevice` has been driven against a board.
+**Still unverified: `AddDevice`'s own write path end to end** (mint, vault, register, board, in
+one run). It needs a signed-in session and an unlocked vault, so it is a hand test rather than
+a gap in the code.
+
+`stage-check.html`/`.jsx` is throwaway scaffolding (rule 4), still earning its place while this
+screen is being iterated on: it renders every stage with fixed props, which is the only quick
+way to look at an occupied board or a half-finished add. Delete it when that stops being true.
 
 **Phase 10, device notifications, is in the roadmap and unbuilt.** Its three load-bearing
 decisions live in ROADMAP.md 10.0 and are the kind that get reversed by accident: a
