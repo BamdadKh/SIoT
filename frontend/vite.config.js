@@ -11,6 +11,13 @@ const here = (rel) => fileURLToPath(new URL(rel, import.meta.url));
  * entry shows up as index.html arriving where JSON was expected.
  *
  * `/logout` covers `/logout-everywhere`; these are prefix matches.
+ *
+ * Being prefix matches also means a server path claims every client route under
+ * it. `/devices` covers `/devices/register` and `/devices/:id/records` without
+ * being listed three times, and it is why the provisioning screen is at
+ * `/add-device` rather than the `/devices/new` it would otherwise want: that URL
+ * would proxy to the backend on a reload and 404, the same collision `/password`
+ * vs `/change-password` already exists to avoid.
  */
 const API_PATHS = [
   '/health',
@@ -22,6 +29,7 @@ const API_PATHS = [
   '/vault-key',
   '/vault',
   '/change-password',
+  '/devices',
 ];
 
 /**

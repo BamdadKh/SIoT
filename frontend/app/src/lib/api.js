@@ -107,6 +107,43 @@ export function fetchVault() {
 }
 
 /**
+ * Replaces the whole vault document.
+ *
+ * `vault_version` must be exactly the current one plus one. The server settles
+ * that with a compare-and-swap in a single statement, so two tabs saving at once
+ * cannot both pass: the loser gets a 409 naming the version it actually found,
+ * and has to re-read and re-apply rather than retry the same body.
+ *
+ * @param {{ vault_version: number, ciphertext: string }} body `ciphertext` base64url
+ * @returns {Promise<{ vault_version: number }>}
+ */
+export function saveVault(body) {
+  return request('PUT', '/vault', body);
+}
+
+/**
+ * Registers the public half of a device's identity (design 5.3 step 2).
+ *
+ * Both values are things design 5.2 lists as plaintext-by-design. `DEVICE_SECRET`
+ * is not here and must never be: it goes to the vault and to the board, and a
+ * server that held it could decrypt every record it stores.
+ *
+ * @param {{ device_id: string, sign_pub: string }} body both base64url
+ */
+export function registerDevice(body) {
+  return request('POST', '/devices/register', body);
+}
+
+/**
+ * The metadata the server legitimately holds per device. No names: it has none.
+ *
+ * @returns {Promise<{ devices: Array<{ device_id: string, last_seq: string, last_seen_at: string|null }> }>}
+ */
+export function fetchDevices() {
+  return request('GET', '/devices');
+}
+
+/**
  * Rotates the account password: a fresh salt, a new `login_key`, and the
  * existing `vault_key` re-wrapped under the new `kek`. Vault contents are
  * untouched. The server re-verifies `current_login_key` against the stored
