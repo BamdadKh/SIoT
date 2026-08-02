@@ -333,23 +333,52 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 ## Phase 6 — Server-Side Record Validation
 
 ### 6.1 Records endpoint
-- [ ] Route `POST /records` (device-authenticated via signature, not session)
-- [ ] Look up `device_id` → fetch `sign_pub`
-- [ ] Check 1: `Ed25519_verify(sign_pub, AAD||nonce||ciphertext, sig)`
-- [ ] Check 2: `seq > last_seq[device_id]`
-- [ ] Check 3: nonce matches `0x00000000 || seq`
-- [ ] On pass: store blob in `records` table, update `last_seq`
-- [ ] On fail: reject with 4xx, no partial writes
+- [x] Route `POST /records` (device-authenticated via signature, not session) — `src/routes/records.ts`, registered in its own public scope in `app.ts`, alongside (not inside) the `requireSession` scope: a device never holds a session, so that hook would reject every upload with a 401 before the real, signature-based authentication ever ran
+- [x] Look up `device_id` → fetch `sign_pub` — 404 on an unknown `device_id`; not an anti-enumeration concern the way `/salt` is, since design 5.2 already lists `device_id` as something the server legitimately knows
+- [x] Check 1: `Ed25519_verify(sign_pub, AAD||nonce||ciphertext, sig)` — `src/lib/ed25519.ts`, Node's native `crypto.verify` via a JWK-reconstructed public key (no dependency needed for something the platform already implements: an Ed25519 JWK is just `{kty:'OKP', crv:'Ed25519', x: <the same 32 raw bytes>}`)
+- [x] Check 2: `seq > last_seq[device_id]` — a single-statement compare-and-swap (`update devices set last_seq = $2 ... where last_seq < $2`), same reasoning as the `vault_version` CAS in `vault.ts`: two uploads racing for one device must not both pass a separate read
+- [x] Check 3: nonce matches `0x00000000 || seq` — `src/lib/seq.ts`
+- [x] On pass: store blob in `records` table, update `last_seq` (and `last_seen_at`, closing the gap Phase 4.8 left open) — same transaction as the check 2 CAS
+- [x] On fail: reject with 4xx, no partial writes — the CAS and the insert share one transaction, so a failed insert (e.g. the belt-and-braces unique-constraint catch) rolls back the `last_seq` bump too
+
+> **Deviation worth knowing about.** Design 7.3's AAD is `version(1B) || DEVICE_ID(16B) ||
+> record_type(1B) || seq(8B)`, but the same section's own `POST /records` example body is
+> `{ device_id, seq, nonce, ciphertext, sig }` — no `version` or `record_type` field. Read
+> literally, the server cannot reconstruct the AAD it needs to verify without them. Resolved
+> by treating `version` and `record_type` as fixed v1 protocol constants (`PROTOCOL_VERSION =
+> 1`, `RECORD_TYPE_V1 = 0` in `src/lib/wire-format.ts`), not wire fields — both sides derive
+> the same AAD bytes from a constant plus the `device_id`/`seq` already on the wire.
+> `record_type` is reserved for Phase 7's per-schema record types; every record is type 0
+> until then. Firmware built against `docs/protocol.md` (roadmap 4.7, not yet written) needs
+> this stated as a non-negotiable, the same way `boot_epoch` persistence already is.
+>
+> Verified by hand with a throwaway script standing in for the Phase 5 firmware / Phase 4.1
+> browser derivation (neither exists yet): generated an Ed25519 keypair and `device_id`
+> directly, registered it, then walked every path — a correctly signed upload (201), a replay
+> of the same `seq` (409), a tampered signature (401), a `seq`/nonce pairing that doesn't match
+> (400), an unknown `device_id` (404), and a `boot_epoch` jump to confirm the monotonicity
+> check holds across the full uint64 range rather than just JS-safe integers. No automated
+> test; same gap as the rest of `backend/`.
 
 ### 6.2 Records read endpoint
-- [ ] Route `GET /devices/:id/records` (authenticated, owner or grant-holder only — grants come in Phase 8, stub owner-only check for now)
-- [ ] Return raw ciphertext blobs + metadata (seq, nonce, timestamp) for client-side decryption
-- [ ] Pagination / range query by seq or time
+- [x] Route `GET /devices/:id/records` (authenticated, owner or grant-holder only — grants come in Phase 8, stub owner-only check for now) — `src/routes/devices.ts`; 404 for both "not yours" and "does not exist", same anti-enumeration reasoning as the rest of this file
+- [x] Return raw ciphertext blobs + metadata (seq, nonce, timestamp) for client-side decryption
+- [x] Pagination / range query by seq or time — cursor is `seq` (`after_seq`, exclusive), not time: `seq` is the authoritative order (design 7.1) and the device's own clock is never trusted for anything else either. Ascending order, page size 1-500 (default 100)
+
+> Verified by hand in the same session as 6.1: uploaded five records, paged through them two
+> at a time and confirmed the cursor lines up with a single unpaged fetch, confirmed a second
+> account gets 404 on the first account's device, confirmed an unauthenticated request gets
+> 401, and confirmed a made-up `device_id` gets the same 404 a real-but-foreign one does. No
+> automated test.
 
 ### 6.3 Client-side decrypt & display
 - [ ] Fetch device's `device_data_key` from decrypted vault
 - [ ] Decrypt records client-side, verify AAD matches expected device/type
 - [ ] Detect sequence gaps within a `boot_epoch` and surface as "possible missing data" in UI (not an error, just a signal)
+
+> Left unticked: `frontend/app/` UI work, same as the four items 4.8 left open, and gated by
+> the same CLAUDE.md rule that new UI is Opus-only. `GET /devices/:id/records` (6.2) is done
+> and independently testable, so this is a clean stopping point rather than a partial one.
 
 ---
 

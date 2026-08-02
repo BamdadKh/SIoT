@@ -12,6 +12,7 @@ import { authRoutes } from './routes/auth.js';
 import { changePasswordRoutes } from './routes/change-password.js';
 import { deviceRoutes } from './routes/devices.js';
 import { healthRoutes } from './routes/health.js';
+import { recordRoutes } from './routes/records.js';
 import { sessionRoutes } from './routes/session.js';
 import { vaultRoutes } from './routes/vault.js';
 
@@ -89,6 +90,12 @@ export async function buildApp() {
   // even possible — its own anti-enumeration design is what covers that.
   await app.register(healthRoutes);
   await app.register(authRoutes);
+
+  // Also public, but for a different reason: a device never holds a session,
+  // it signs (design Section 7.4). `requireSession` would just reject every
+  // request with a 401 before the signature — the real authentication — is
+  // ever checked.
+  await app.register(recordRoutes);
 
   // Authenticated: the hook belongs to this scope, so anything registered here
   // is protected by construction. New routes go inside unless there is a reason
