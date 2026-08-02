@@ -75,14 +75,22 @@ export function Devices({ username, onSignOut, signingOut }) {
     <>
       <TopBar username={username} onSignOut={onSignOut} signingOut={signingOut} />
       <main className="page">
-        <div className="page-head">
-          <h1 className="h2">Devices</h1>
-          {state.status === 'ok' ? (
-            <Link to="/add-device" className="button button-inline">
-              Add device
-            </Link>
-          ) : null}
-        </div>
+        {/*
+          The whole head waits for the fetches, rather than the heading landing
+          first and the link arriving with the list. A heading that is alone for
+          one paint and then gains a control reads as the page still assembling
+          itself; nothing below it can be shown yet anyway.
+        */}
+        {state.status !== 'checking' ? (
+          <div className="page-head">
+            <h1 className="h2">Devices</h1>
+            {state.status === 'ok' ? (
+              <Link to="/add-device" className="button button-inline">
+                Add device
+              </Link>
+            ) : null}
+          </div>
+        ) : null}
 
         {state.status === 'rollback' ? (
           <section className="rollback-warning">
