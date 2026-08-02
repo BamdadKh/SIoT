@@ -50,7 +50,7 @@ function Frame({ label, children }) {
             <a className="button button-link" href="#">
               Devices
             </a>
-            <button className="button button-link" type="button">
+            <button className="button button-link button-link-quiet" type="button">
               Sign out
             </button>
           </div>
@@ -76,7 +76,7 @@ createRoot(document.getElementById('root')).render(
       </div>
       <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
         Not an ESP32, or no board to hand?{' '}
-        <button className="button button-link" type="button">
+        <button className="button button-link button-link-quiet" type="button">
           Add it without one
         </button>
       </p>
@@ -91,7 +91,7 @@ createRoot(document.getElementById('root')).render(
       </div>
       <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
         Wrong board?{' '}
-        <button className="button button-link" type="button">
+        <button className="button button-link button-link-quiet" type="button">
           Disconnect
         </button>
       </p>
@@ -110,7 +110,7 @@ createRoot(document.getElementById('root')).render(
       </div>
       <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
         Finished with this board?{' '}
-        <button className="button button-link" type="button">
+        <button className="button button-link button-link-quiet" type="button">
           Disconnect
         </button>
       </p>

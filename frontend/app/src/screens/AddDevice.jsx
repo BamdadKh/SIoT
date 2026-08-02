@@ -306,7 +306,7 @@ function NamingStage({ named, busy, serialSupported, onSkip }) {
         <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
           Not an ESP32, or no board to hand?{' '}
           <button
-            className="button button-link"
+            className="button button-link button-link-quiet"
             type="button"
             onClick={onSkip}
             disabled={!named || Boolean(busy)}
@@ -359,7 +359,7 @@ function BoardStage({ board, busy, onDisconnect }) {
         <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
           Finished with this board?{' '}
           <button
-            className="button button-link"
+            className="button button-link button-link-quiet"
             type="button"
             onClick={onDisconnect}
             disabled={Boolean(busy)}
@@ -388,7 +388,7 @@ function BoardStage({ board, busy, onDisconnect }) {
       <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
         Wrong board?{' '}
         <button
-          className="button button-link"
+          className="button button-link button-link-quiet"
           type="button"
           onClick={onDisconnect}
           disabled={Boolean(busy)}
