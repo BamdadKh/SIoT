@@ -138,14 +138,20 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   `.button-link` is `display: inline` for this reason: it inherits `display: flex` from
   `.button`, which is invisible inside the `.row` footers (a flex item is blockified anyway)
   and obviously wrong the moment one sits in a sentence.
-- **A link inside a sentence takes `.button-link-quiet`; a link in a footer does not.**
-  `.button-link`'s 600 weight is right where it is the only olive thing in its zone, below a
-  rule. Stacked directly under a full-width olive button it reads as a highlight dropped into
-  the middle of a sentence, and two olive controls in a column argue about which is the thing
-  to press. The quiet variant keeps olive, because the token rule is not negotiable and this is
-  an action, and moves the affordance from weight to an underline. Two link weights on one
-  screen is the point, not an inconsistency: standalone controls and words inside a sentence
-  are different contexts.
+- **There is one link appearance, and it is the bare `a` rule.** Olive, 600, no underline
+  until hover, whether the element is a `<Link>` or a `<button className="button
+  button-link">`. An earlier pass had a second variant (`.button-link-quiet`: plain weight,
+  underlined at rest) for links sitting under a primary button, on the reasoning that two
+  olive controls in a column argue about which is the thing to press. Reverted: what it
+  actually produced was two link weights and two underline behaviours in one app, and
+  "Add it without one" reading as a different kind of thing from "Create one" three screens
+  away. If a link under a button ever competes with it again, the answer is fewer controls
+  on that screen, not a second link style.
+- **A disabled link-control is faint ink, never a filled shape.** `.button:disabled` paints
+  `--olive-mute` at specificity 0,2,0 and beats `.button`'s own `background` declaration, so
+  a `.button-link` that is merely `display: inline` inherits an olive block the moment it is
+  disabled. `.button-link:disabled` exists to undo that and has to keep winning on source
+  order; it is not decoration.
 - **Status panels are one family: `.alarm`, `.success`, `.board-note`.** Same box metrics,
   differing only in token. `.board-note` is the neutral member, for things that are neither
   failures nor completions ("this board is blank", "added but not written to hardware"). It

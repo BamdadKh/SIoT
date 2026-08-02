@@ -291,6 +291,15 @@ a:hover {
   font-stretch: 100%;
   font-weight: 600;
   font-size: var(--size-small);
+  /* Deliberately identical to the bare `a` rule at the top of this file: same
+     olive, same 600, same underline-on-hover only. A <button> that is dressed as
+     a link and a <Link> that is one sit in the same sentences on the same
+     screens, and the element they happen to be is an implementation detail the
+     reader should never be able to see. There was a `.button-link-quiet`
+     variant here, underlined at rest, to keep a link under a primary button from
+     competing with it; it bought that at the cost of two link weights and two
+     underline behaviours in one app, which is what it looked like. */
+  text-decoration: none;
   cursor: pointer;
 }
 
@@ -301,25 +310,14 @@ a:hover {
   text-underline-offset: 2px;
 }
 
-/* The same control, for a secondary action sitting directly under a primary
-   button rather than in a footer.
-
-   `.button-link` at full weight works below a rule, where it is the only olive
-   thing in its zone. Stacked immediately under a full-width olive button it
-   reads as a highlight dropped into the middle of a sentence, and two olive
-   controls in a column compete over which one is the thing to press. It stays
-   olive, because the token rule is not negotiable and this is an action; what
-   changes is that the affordance moves from weight to the underline, so the line
-   reads as one sentence with a word you can click. */
-.button-link-quiet {
-  font-weight: inherit;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
-}
-
-.button-link-quiet:disabled {
+/* `.button:disabled` paints `--olive-mute` and beats `.button { background }`'s
+   `none` on specificity, so without this every disabled link-control came out as
+   a word sitting on an olive block. A link that cannot be pressed is faint ink,
+   not a filled shape. */
+.button-link:disabled {
+  background: none;
   color: var(--ink-faint);
+  text-decoration: none;
   cursor: default;
 }
 
