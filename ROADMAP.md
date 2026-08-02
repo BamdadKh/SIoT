@@ -278,18 +278,10 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > out of source control, and it is the only way the overwrite check in 4.5 can exist at all.
 > Other hardware is served by the published protocol plus 4.6, not by a second guided flow.
 
-- [ ] Basic page: "Connect device" button using Web Serial API (`navigator.serial.requestPort`)
-- [ ] Handle browser support check (Web Serial is Chromium-only — surface a clear message that names the reveal path in 4.6 rather than dead-ending)
-- [ ] UI flow: name the device → connect to board → write
+- [x] Basic page: "Connect device" button using Web Serial API (`navigator.serial.requestPort`) — `app/src/screens/AddDevice.jsx` at `/add-device`. The chooser is deliberately **not** filtered by USB vendor id: the filter would have to enumerate every bridge an ESP32 board might carry (CP2102, CH340, FTDI, the S-series' native USB) and a board missing from that list looks broken rather than unlisted. The `HELLO` handshake is the real check and it tests the thing that matters, which is whether the provisioning sketch is running
+- [x] Handle browser support check (Web Serial is Chromium-only — surface a clear message that names the reveal path in 4.6 rather than dead-ending) — names Chromium explicitly rather than saying "unsupported browser", and offers adding the device without a board as a *link*, not a button. It is a real thing to want on Firefox or Safari and it leaves a device half-set-up, so it should not sit where a stray click lands. 4.6 does not exist yet, so the copy says the credentials route is coming rather than linking to nothing
+- [x] UI flow: name the device → connect to board → write — three stages in that order, and **the board is checked before anything is minted**. A board that already belongs to another device therefore costs nothing to discover: no `DEVICE_ID` generated, no vault write, no registration. Doing it the other way round means every refusal burns an identity. One `<form>` dispatching on stage rather than a set of `onClick` buttons, so Enter in the name field does the obvious thing, and a submit fired by Enter still counts as the user gesture `requestPort` requires
 
-> **The screen exists and stops short of the board.** `app/src/screens/AddDevice.jsx`, at
-> `/add-device`, does design 5.3's steps 1 to 3: mint `DEVICE_ID`/`DEVICE_SECRET`, seal them
-> into the vault, register the public half. Step 4, the Web Serial write to NVS, is 4.5 and
-> cannot be built or exercised until the provisioning sketch exists, so the three items above
-> stay open. The completion state says plainly that the credentials have not reached any
-> hardware rather than implying a device is ready; when 4.5 lands, "Connect device" follows
-> the step that is there and that sentence comes out.
->
 > **The write order deviates from design 5.3, and it is about which half-completed state a
 > person can be left holding.** 5.3 registers (step 2) before the vault write (step 3).
 > Register first and let the vault write fail and the server holds a `DEVICE_ID` and a signing
@@ -297,6 +289,10 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > as an orphan (design 5.4) forever. Vault first and let registration fail and the secret is
 > safely stored, the same id can be registered again, and the device list offers exactly that
 > button. One order is recoverable and the other is not, so the vault write goes first.
+>
+> The board write is appended to that same chain, last, for the same reason. The vault is the
+> only durable home this secret has: write the board first and lose the tab, and the secret
+> exists on a board and nowhere else, happily encrypting records nothing in the world can open.
 >
 > The screen re-reads the vault immediately before writing rather than trusting what the list
 > already had. A write built on a stale version is a 409, and a 409 here costs a freshly minted
@@ -309,12 +305,29 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > not the input, since the crypto layer normalises it.
 
 ### 4.5 Web Serial provisioning tool — NVS write protocol
-- [ ] Define simple serial command protocol for the tool ↔ ESP32 bootstrap sketch (e.g. `READ_ID`, `WRITE_CREDS`)
-- [ ] Write a minimal "provisioning listener" Arduino sketch that just handles NVS read/write over serial (separate from application firmware)
-- [ ] Implement read-back: tool reads existing `DEVICE_ID` from NVS before writing
-- [ ] Implement overwrite protection logic: no ID → proceed; matching ID → proceed; different ID → refuse with warning
-- [ ] Implement actual write of `DEVICE_ID` + `DEVICE_SECRET` to dedicated NVS partition
-- [ ] Test round-trip on a real ESP32: provision, power cycle, re-read confirms values persisted
+- [x] Define simple serial command protocol for the tool ↔ ESP32 bootstrap sketch (e.g. `READ_ID`, `WRITE_CREDS`) — `SIOT HELLO` / `SIOT READ-ID` / `SIOT WRITE`, line-oriented ASCII at 115200, one response line per command. Specified in the sketch header and spoken from the other end by `app/src/lib/provisioning-protocol.js`. Both sides ignore anything not prefixed `SIOT `, because the port also carries ROM bootloader chatter and whatever a serial monitor left behind, and a "first line back" rule would resolve a command with noise
+- [x] Write a minimal "provisioning listener" Arduino sketch that just handles NVS read/write over serial (separate from application firmware) — `firmware/esp32-provisioning/`. No WiFi, no network stack, no SIoT wire protocol. base64url hand-rolled rather than taken from the core's libb64, which does padded standard base64; the decoder rejects non-canonical trailing bits, without which several strings decode to the same 16 bytes and `DEVICE_ID` stops being a canonical form of itself
+- [x] Implement read-back: tool reads existing `DEVICE_ID` from NVS before writing — and an NVS *error* on that read throws rather than reading as blank, which is the dangerous confusion: a failed read that returned "nothing there" would send the next step straight into overwriting whatever is on the board
+- [x] Implement overwrite protection logic: no ID → proceed; matching ID → proceed; different ID → refuse with warning — the decision is in the tool, per design 5.4, because only this side has the vault and can tell whether an id on a board is one of the user's own devices; that difference is the whole content of the warning. **The board enforces it independently as a compare-and-swap**: `WRITE` carries the id the tool believes is there and the board refuses if that is not what it finds. Between the read and the write a user can unplug one board and plug in another, and a check computed for the first would otherwise be applied to the second. There is no "write anyway" control, deliberately
+- [x] Implement actual write of `DEVICE_ID` + `DEVICE_SECRET` to dedicated NVS partition — `partitions.csv`, a superset of the stock 4MB `default` table with `siot` inserted. A namespace in the stock `nvs` was rejected: the application owns that partition, `nvs_flash_erase()` and a misaimed `Preferences.clear()` wipe all of it, and a factory-reset routine is an ordinary thing for a sketch to have. The write reads both values back and compares in RAM before answering `OK`, so success means the bytes are in flash rather than that an API call returned
+- [x] Test round-trip on a real ESP32: provision, power cycle, re-read confirms values persisted — done harder than the item asks. A throwaway PowerShell probe over COM6 covering 18 cases (handshake; blank board reads as `-`; write; read-back; a blank expectation going stale once an id is present; a wrong expectation refused *and storage confirmed unchanged after it*; re-provisioning the same id; rotating to a new one; short, non-alphabet and non-canonical values rejected; missing and extra arguments rejected; unknown command rejected). Then a **full recompile-and-upload followed by a hard reset**, after which `READ-ID` returned the same id: a stronger claim than a power cycle, since it is the one design 5.3 actually rests on
+
+> **Not verified: the browser transport end to end.** `provisioning-protocol.js` has 22
+> `node --test` cases and the sketch has the 18-case hardware probe above, but
+> `app/src/lib/web-serial.js` between them has been exercised only as far as the port chooser.
+> `navigator.serial` has no shim worth trusting and the chooser is a native dialog that needs a
+> human to pick a port, so this cannot be automated from here. `frontend/app/serial-check.html`
+> is throwaway scaffolding for closing that gap: read-only, `READ-ID` twice so a reader left
+> holding a stolen chunk would show up, and no path in it that writes. **Delete it once
+> `AddDevice` has been driven against a board by hand.**
+>
+> One thing that page exists to catch, because it was a real bug and not a hypothetical: the
+> obvious way to write the transport is to race `reader.read()` against a timeout inside each
+> exchange, and it is quietly wrong. When the timeout wins the read is still outstanding, and it
+> consumes the next chunk off the wire and drops it. That turns the handshake's retry loop, the
+> thing that exists to wait out the boot chatter from the DTR/RTS auto-reset, into a way to lose
+> the board's answer. It is now a single long-lived pump that owns every read, with callers
+> waiting on the buffer it fills.
 
 ### 4.6 Reveal credentials — the escape hatch
 > Not a second supported path and must not be shaped like one (design 5.3.1). It exists so
