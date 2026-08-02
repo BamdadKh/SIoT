@@ -510,6 +510,27 @@ a:hover {
   text-align: center;
 }
 
+/* --- provisioning -------------------------------------------------------- */
+
+/* A statement of fact about the board or the outcome, in the shape of `.alarm`
+   and `.success` but in neither of their colours. "This board is blank" and
+   "added, but not written to hardware" are neither failures nor completions, and
+   dressing them as either would be the screen taking a position it does not
+   have. Ruled and ink-coloured: the same panel, saying only what is true. */
+.board-note {
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--ink-muted);
+  font-size: var(--size-small);
+  line-height: 1.55;
+  padding: 10px var(--sp-3);
+  margin: 0;
+}
+
+.board-note strong {
+  color: var(--ink);
+}
+
 /* --- device list --------------------------------------------------------- */
 
 /* One ruled block rather than a card per device. A device list is a register of

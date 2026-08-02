@@ -1,44 +1,95 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { addDevice, generateDevice, listDevices, toBase64Url } from '@siot/crypto';
 import { ApiError, registerDevice } from '../lib/api.js';
 import { loadVault, storeVault, VaultRollbackError } from '../lib/vault-store.js';
+import { isWebSerialSupported, requestPort, ProvisioningSession } from '../lib/web-serial.js';
+import { classifyBoard, BLANK, SAME, OCCUPIED } from '../lib/provisioning-protocol.js';
+import { shortDeviceId } from '../lib/device-list.js';
 import { Link } from '../lib/router.jsx';
 import { Plate } from '../components/Plate.jsx';
 import { Field } from '../components/Field.jsx';
 import { SubmitButton } from '../components/SubmitButton.jsx';
 
 /**
- * Minting a device (design Section 5.3, roadmap 4.4).
+ * Minting a device and putting it on a board (design 5.3, roadmap 4.4 and 4.5).
  *
  * A `Plate` rather than the `TopBar` shell, matching `ChangePassword`: one
  * focused action reached from `Devices`, with the way back in a footer row.
+ *
+ * Three stages, in the order design 5.3 asks for: name it, connect to the board
+ * and see what is already on it, then write. The board is checked *before*
+ * anything is minted, so a board that already belongs to another device costs
+ * nothing to discover: no vault entry, no registration, no wasted `DEVICE_ID`.
  *
  * The name is asked for first and is not optional, which is design 5.5 taken
  * literally: there is no moment at which a device exists as a bare `DEVICE_ID`
  * waiting to be labelled. `addDevice` in the crypto layer enforces the same
  * thing, so this is a friendlier place to say it and not the only place it holds.
- *
- * **This screen does not write to a board yet.** Design 5.3's steps 1 to 3
- * (mint, register, vault) are here; step 4, the Web Serial write to NVS, is
- * roadmap 4.5 and needs the provisioning sketch to exist before any of it can be
- * exercised. So the completion state says plainly that the credentials have not
- * reached hardware rather than implying a device is ready. When 4.5 lands, the
- * "Connect device" step follows the one below and this note comes out.
  */
 export function AddDevice({ username, onSignOut, signingOut }) {
   const [name, setName] = useState('');
+  const [stage, setStage] = useState('naming');
+  const [board, setBoard] = useState(null);
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
-  const [added, setAdded] = useState(null);
+  const [done, setDone] = useState(null);
 
-  async function handleSubmit(event) {
-    event.preventDefault();
-    if (!name.trim()) {
-      setError('Give the device a name first.');
+  const session = useRef(null);
+
+  // Constant for the life of the tab, so it is read once rather than per render.
+  const [serialSupported] = useState(isWebSerialSupported);
+
+  const release = useCallback(async () => {
+    const open = session.current;
+    session.current = null;
+    await open?.close();
+  }, []);
+
+  // A port stays open for the life of the tab. Leaving one behind means the next
+  // attempt fails on a port already in use, with nothing on screen saying why.
+  useEffect(() => () => void release(), [release]);
+
+  async function handleConnect() {
+    setError(null);
+
+    let port;
+    try {
+      port = await requestPort();
+    } catch {
+      // The chooser was dismissed without picking anything. A deliberate cancel
+      // is not a failure and gets no error message.
       return;
     }
+
+    setBusy('Connecting to the board');
+    try {
+      const opened = new ProvisioningSession(port);
+      await opened.open();
+      session.current = opened;
+
+      const storedId = await opened.readId();
+
+      /*
+       * The vault is read here, before anything is written anywhere, for two
+       * reasons. It names an occupied board's device where the vault knows it,
+       * which is the whole content of the warning below. And a rollback surfaces
+       * now rather than three steps later with a board half-provisioned.
+       */
+      const { document } = await loadVault(username);
+      // `null` because the device does not exist yet: an id that has not been
+      // generated cannot match what is on a board, so any occupant is OCCUPIED.
+      setBoard(classifyBoard(storedId, null, listDevices(document)));
+      setStage('board');
+    } catch (failure) {
+      await release();
+      setError(failure instanceof VaultRollbackError ? describeRollback(failure) : failure.message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleAdd({ writeToBoard }) {
     setError(null);
-    setAdded(null);
 
     let device = null;
     let stored = null;
@@ -47,9 +98,9 @@ export function AddDevice({ username, onSignOut, signingOut }) {
       setBusy('Generating keys');
       device = await generateDevice();
 
-      // Re-read rather than trusting whatever the list already had. The vault
-      // may have moved under this tab, and a write built on a stale version is
-      // a 409 that costs a freshly minted DEVICE_SECRET to recover from.
+      // Re-read rather than trusting what the connect step saw. The vault may
+      // have moved under this tab, and a write built on a stale version is a 409
+      // that costs a freshly minted DEVICE_SECRET to recover from.
       setBusy('Reading your vault');
       const { version, document } = await loadVault(username);
 
@@ -60,18 +111,19 @@ export function AddDevice({ username, onSignOut, signingOut }) {
       });
 
       /*
-       * The vault write goes first, and design 5.3 lists registration as step 2.
-       * The deviation is deliberate, and it is about which half-completed state
-       * a person can be left holding.
+       * The vault write goes first, and design 5.3 lists registration as step 2
+       * and the board write as step 4. Both deviations are about which
+       * half-completed state a person can be left holding.
        *
-       * Register first and let the vault write fail: the server has a DEVICE_ID
-       * and a signing key, and the DEVICE_SECRET that only ever existed in this
-       * tab's memory is gone. That id is burned permanently and shows as an
-       * orphan (design 5.4) forever.
+       * The vault is the only durable home this secret has. Write the board
+       * first and lose the tab and the secret exists on a board and nowhere
+       * else: it will happily encrypt records that nothing in the world can
+       * open. Register first and lose the vault write and the id is burned
+       * permanently and shows as an orphan (design 5.4) forever.
        *
-       * Vault first and let registration fail: the secret is safely stored and
-       * registering again with the same id works. The device list offers exactly
-       * that. One order is recoverable and the other is not.
+       * Vault first, and every later failure is recoverable: the secret is
+       * stored, the same id registers again, and the same board takes the same
+       * credentials on a second run.
        */
       setBusy('Saving to your vault');
       await storeVault(username, version, next);
@@ -87,23 +139,67 @@ export function AddDevice({ username, onSignOut, signingOut }) {
         sign_pub: toBase64Url(device.signPub),
       });
 
-      setAdded({ name: stored, registered: true });
-      setName('');
+      if (writeToBoard) {
+        setBusy('Writing to the board');
+        // `board.storedId` is what the board reported a moment ago, and the
+        // board checks it again before writing. If someone swapped the cable in
+        // between, this refuses rather than overwriting the new board.
+        await session.current.write(
+          board.storedId,
+          toBase64Url(device.deviceId),
+          toBase64Url(device.deviceSecret),
+        );
+      }
+
+      setDone({ name: stored, wroteToBoard: writeToBoard });
+      setStage('done');
     } catch (failure) {
       if (stored !== null) {
-        // The vault write landed and only registration failed. Saying nothing
-        // happened would be false, and the device really is recoverable.
-        setAdded({ name: stored, registered: false });
-        setName('');
+        // The vault write landed. Saying nothing happened would be false, and
+        // the device really is recoverable from the list.
+        setDone({ name: stored, wroteToBoard: false });
+        setStage('done');
       }
       setError(describe(failure, stored !== null));
     } finally {
       setBusy(null);
-      // The secret's home is the vault from here on. Best effort, the same
-      // caveat the keyring carries: JS cannot promise a byte is gone.
+      // The secret's home is the vault and the board from here on. Best effort,
+      // the same caveat the keyring carries: JS cannot promise a byte is gone.
       device?.deviceSecret.fill(0);
       device?.dataKey.fill(0);
+      await release();
     }
+  }
+
+  const named = name.trim().length > 0;
+
+  /*
+   * One form, and the primary action is whatever the current stage's next step
+   * is. Keeping it a real submit rather than a set of onClick buttons is what
+   * makes Enter in the name field do the obvious thing, and a submit fired by
+   * Enter still counts as the user gesture `requestPort` requires.
+   */
+  function handleSubmit(event) {
+    event.preventDefault();
+    if (busy) return;
+
+    if (stage === 'naming') {
+      if (!named) {
+        setError('Give the device a name first.');
+        return;
+      }
+      return void (serialSupported ? handleConnect() : handleAdd({ writeToBoard: false }));
+    }
+    if (stage === 'board' && board.state !== OCCUPIED) {
+      return void handleAdd({ writeToBoard: true });
+    }
+  }
+
+  async function handleDisconnect() {
+    await release();
+    setBoard(null);
+    setError(null);
+    setStage('naming');
   }
 
   return (
@@ -114,25 +210,25 @@ export function AddDevice({ username, onSignOut, signingOut }) {
       <h1 className="h1">Add a device</h1>
       <p className="prose" style={{ marginTop: 'var(--sp-3)' }}>
         The name is stored in your vault, encrypted, and never reaches the server. Neither does
-        the device&rsquo;s secret. The server is told an identifier and a public key, which is all
-        it needs to tell a genuine upload from a forged one.
+        the device&rsquo;s secret: it goes from this page straight to the board over USB. The
+        server is told an identifier and a public key, which is all it needs to tell a genuine
+        upload from a forged one.
       </p>
 
       <form onSubmit={handleSubmit}>
-        <div style={{ marginTop: 'var(--sp-5)' }}>
-          <Field
-            label="Device name"
-            value={name}
-            onChange={(value) => {
-              setName(value);
-              setAdded(null);
-            }}
-            disabled={Boolean(busy)}
-            placeholder="Greenhouse humidity"
-            maxLength={64}
-            autoFocus
-          />
-        </div>
+        {stage !== 'done' ? (
+          <div style={{ marginTop: 'var(--sp-5)' }}>
+            <Field
+              label="Device name"
+              value={name}
+              onChange={setName}
+              disabled={Boolean(busy) || stage === 'board'}
+              placeholder="Greenhouse humidity"
+              maxLength={64}
+              autoFocus
+            />
+          </div>
+        ) : null}
 
         {error ? (
           <p className="alarm" style={{ marginTop: 'var(--sp-4)' }} role="alert">
@@ -140,19 +236,20 @@ export function AddDevice({ username, onSignOut, signingOut }) {
           </p>
         ) : null}
 
-        {added?.registered ? (
-          <div className="success" style={{ marginTop: 'var(--sp-4)' }} role="status">
-            <strong>{added.name}</strong> is in your vault and registered. Its credentials have
-            not reached any hardware yet: writing them to a board over USB is the next part being
-            built.
-          </div>
+        {stage === 'naming' ? (
+          <NamingStage
+            named={named}
+            busy={busy}
+            serialSupported={serialSupported}
+            onSkip={() => handleAdd({ writeToBoard: false })}
+          />
         ) : null}
 
-        <div style={{ marginTop: 'var(--sp-5)' }}>
-          <SubmitButton busy={Boolean(busy)} busyLabel={busy} disabled={!name.trim()}>
-            Add device
-          </SubmitButton>
-        </div>
+        {stage === 'board' ? (
+          <BoardStage board={board} busy={busy} onDisconnect={handleDisconnect} />
+        ) : null}
+
+        {stage === 'done' ? <DoneStage done={done} /> : null}
       </form>
 
       <hr className="rule" style={{ margin: 'var(--sp-6) 0 18px' }} />
@@ -178,17 +275,161 @@ export function AddDevice({ username, onSignOut, signingOut }) {
   );
 }
 
-function describe(failure, savedToVault) {
-  const tail = savedToVault
-    ? ' The device is saved in your vault; finish registering it from Devices.'
-    : ' Nothing was changed.';
+/**
+ * Name it, then reach for the board.
+ *
+ * Connecting is the primary action even though it is not the last one, because
+ * it is the next thing to do and the guided path is the supported path (design
+ * 5.3). Adding without a board is a link rather than a button: it is a real
+ * thing to want on a browser that cannot do Web Serial, and it leaves a device
+ * half-set-up, so it should not sit where a stray click lands.
+ */
+function NamingStage({ named, busy, serialSupported, onSkip }) {
+  return (
+    <>
+      {!serialSupported ? (
+        <p className="board-note" style={{ marginTop: 'var(--sp-4)' }}>
+          This browser cannot talk to a board. Writing credentials over USB needs Web Serial,
+          which today means a Chromium browser: Chrome, Edge or Opera on desktop. You can still
+          add the device here and provision it from a Chromium browser later, or with the
+          credentials themselves once revealing them is built.
+        </p>
+      ) : null}
 
-  if (failure instanceof VaultRollbackError) {
+      <div style={{ marginTop: 'var(--sp-5)' }}>
+        <SubmitButton busy={Boolean(busy)} busyLabel={busy} disabled={!named}>
+          {serialSupported ? 'Connect board' : 'Add device'}
+        </SubmitButton>
+      </div>
+
+      {serialSupported ? (
+        <p className="small" style={{ marginTop: 'var(--sp-4)' }}>
+          No board to hand?{' '}
+          <button
+            className="button button-link"
+            type="button"
+            onClick={onSkip}
+            disabled={!named || Boolean(busy)}
+          >
+            Add it without one
+          </button>{' '}
+          and write the credentials later.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * What is already on the board, and design 5.4's decision about it.
+ *
+ * An occupied board is refused rather than warned about. Overwriting it would
+ * leave whatever device that is still reporting, under an identity nothing in
+ * the vault can decrypt, with no way to recover it: the board would look fine
+ * and the data would be gone. There is no "write anyway" here on purpose.
+ */
+function BoardStage({ board, busy, onDisconnect }) {
+  if (board.state === OCCUPIED) {
     return (
-      `The server returned vault version ${failure.serverVersion} when this browser has already ` +
-      `seen ${failure.cachedVersion}. Nothing was added. Open Devices to see the warning in full.`
+      <>
+        <div className="alarm" style={{ marginTop: 'var(--sp-4)' }} role="alert">
+          <strong>This board already belongs to another device.</strong>
+          <p style={{ margin: 'var(--sp-2) 0 0' }}>
+            It is holding{' '}
+            {board.storedName ? (
+              <>
+                <strong>{board.storedName}</strong> (
+                <span className="mono" title={board.storedId}>
+                  {shortDeviceId(board.storedId)}
+                </span>
+                )
+              </>
+            ) : (
+              <>
+                <span className="mono" title={board.storedId}>
+                  {shortDeviceId(board.storedId)}
+                </span>
+                , which is not in your vault
+              </>
+            )}
+            . Writing over it would leave that device reporting under credentials nothing can
+            decrypt, permanently. Nothing has been changed.
+          </p>
+        </div>
+        <p className="small" style={{ marginTop: 'var(--sp-4)' }}>
+          Use a different board, or re-provision that device from its own entry in Devices.{' '}
+          <button
+            className="button button-link"
+            type="button"
+            onClick={onDisconnect}
+            disabled={Boolean(busy)}
+          >
+            Disconnect
+          </button>
+        </p>
+      </>
     );
   }
+
+  return (
+    <>
+      <p className="board-note" style={{ marginTop: 'var(--sp-4)' }}>
+        {board.state === BLANK
+          ? 'This board has no credentials on it. Ready to provision.'
+          : 'This board already holds this device. Writing again will refresh its credentials.'}
+      </p>
+
+      <div style={{ marginTop: 'var(--sp-5)' }}>
+        <SubmitButton busy={Boolean(busy)} busyLabel={busy}>
+          Write to board
+        </SubmitButton>
+      </div>
+
+      <p className="small" style={{ marginTop: 'var(--sp-4)' }}>
+        <button
+          className="button button-link"
+          type="button"
+          onClick={onDisconnect}
+          disabled={Boolean(busy)}
+        >
+          Disconnect
+        </button>{' '}
+        without writing.
+      </p>
+    </>
+  );
+}
+
+/** Says which of the two endings happened, because they are not the same state. */
+function DoneStage({ done }) {
+  return done.wroteToBoard ? (
+    <div className="success" style={{ marginTop: 'var(--sp-5)' }} role="status">
+      <strong>{done.name}</strong> is in your vault, registered, and written to the board. It
+      will start reporting once it is running firmware that uses those credentials.
+    </div>
+  ) : (
+    <div className="board-note" style={{ marginTop: 'var(--sp-5)' }} role="status">
+      <strong>{done.name}</strong> is in your vault and registered, but its credentials have not
+      reached any hardware. It will show in Devices as never having reported until you provision
+      a board for it.
+    </div>
+  );
+}
+
+function describeRollback(failure) {
+  return (
+    `The server returned vault version ${failure.serverVersion} when this browser has already ` +
+    `seen ${failure.cachedVersion}. Nothing was added. Open Devices to see the warning in full.`
+  );
+}
+
+function describe(failure, savedToVault) {
+  const tail = savedToVault
+    ? ' The device is saved in your vault; finish setting it up from Devices.'
+    : ' Nothing was changed.';
+
+  if (failure instanceof VaultRollbackError) return describeRollback(failure);
+
   if (failure instanceof ApiError) {
     if (failure.status === 401) return `Your session ended. Sign in again.${tail}`;
     if (failure.status === 0) return `Could not reach the server.${tail}`;
