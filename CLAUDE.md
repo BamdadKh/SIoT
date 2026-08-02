@@ -231,6 +231,14 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   does not stay revealed; states its costs at the moment of revealing. Past that button the
   guarantees in the design document genuinely stop, and a flow that made it look routine would
   be misrepresenting where the boundary is.
+- **The occupied-board override is the same species, and takes the same shape.** Design 5.4's
+  refusal is the default state and offers no submit at all; the override is a second deliberate
+  click on a link, and it does not stay armed, because reconnecting is a different board and so
+  a fresh decision. It exists because an unconditional refusal makes a board carrying a dead
+  device permanently unusable and no vault entry can release it. What it overrides is the tool's
+  willingness to offer the write. The board's compare-and-swap is untouched and must stay that
+  way: it is what stops a board swapped between the read and the write being provisioned against
+  a check computed for a different one, and no UI state may weaken it.
 - **Device names live in the vault, encrypted.** There is no `name` column on `devices` and
   adding one is the kind of change the one rule exists to catch: "bedroom motion sensor"
   beside the upload timestamps the server already holds is a labelled occupancy log. Renaming
@@ -515,7 +523,8 @@ leaving it to review.
 `DEVICE_SECRET` over USB serial into the dedicated `siot` NVS partition. `AddDevice` now names,
 connects, checks the board and writes, in that order, and **checks the board before minting
 anything**, so a board that already belongs to another device costs nothing to discover. An
-occupied board is refused outright; there is no "write anyway". `provisioning-protocol.js` is
+occupied board is refused by default, with an armed-by-a-second-click override behind it (see
+the escape-hatch note above; the confirmation names what the write destroyed). `provisioning-protocol.js` is
 the pure codec (22 tests), `web-serial.js` the transport (untestable, verified against a board).
 
 Verified on real hardware over COM6 with a throwaway PowerShell probe: 18 protocol cases, then

@@ -162,6 +162,8 @@ Before writing, the tool reads back any `DEVICE_ID` already present in NVS:
 - **ID matches the selected vault record** → re-provisioning the same device, proceed.
 - **ID present but different** → refuse, and surface a clear warning. Overwriting would orphan the existing vault record — the device would keep reporting under an identity nothing in the vault can decrypt anymore, with no way to recover it.
 
+Refusal is the default and not the only outcome. A board whose device is genuinely dead is otherwise a brick, and nothing in the vault can release it, so an override exists. It is governed by the same rules as revealing credentials (5.3.1) and for the same reason: it is reached by a second deliberate action rather than offered as a step, it states its cost at the moment of arming rather than in documentation, and it does not stay armed. What it overrides is the tool's willingness to offer the write, never the board's compare-and-swap, which is what keeps a board swapped between the read and the write from being provisioned against a check computed for a different one.
+
 This check requires a channel to the board and therefore does not extend to revealed credentials (5.3.1). Somebody provisioning their own hardware owns that failure mode, and the reveal flow should say so rather than let it be discovered when a device goes quiet.
 
 ### 5.5 Device names
@@ -480,6 +482,7 @@ The architecture is settled in shape. These remain genuinely open and should be 
 | `DEVICE_SECRET` split into data key + signing key | 5.1, 9.1 | Grants conveyed forgery capability; read and write are now separable |
 | Provisioning writes NVS credentials only; no firmware building | 6 | The previous update flow required the browser to compile C++ |
 | ESP32 + Web Serial kept as the one supported path; reveal added as an escape hatch | 5.3, 6.1 | Copy-paste was briefly made the default to widen hardware support, and it cost the properties the guided flow exists to provide: no clipboard exposure, no secret in source control, and the overwrite check of 5.4. One target done properly plus a published protocol serves ports better than a second half-supported path |
+| Overwrite protection gained an override, shaped as an escape hatch | 5.4 | An unconditional refusal makes a board carrying a dead device permanently unusable, and no vault entry can release it. Kept off the ordinary path: a second deliberate action, cost stated at the moment of arming, does not stay armed. The board's compare-and-swap is untouched |
 | Device names, encrypted in the vault | 5.5 | A list of 128-bit identifiers is unusable past one device; a server-side name field would turn accepted timing metadata into a labelled occupancy log |
 | Device liveness derived from signed records | 5.6, 8 | Users need to know a device has stopped. The server cannot forge a newer signed record, so it can only make a device look *more* offline — the safe direction |
 | Per-device encrypted firmware blob removed | 6 | Obsolete once credentials are decoupled from firmware images |

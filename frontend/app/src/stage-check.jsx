@@ -114,12 +114,40 @@ createRoot(document.getElementById('root')).render(
           Disconnect
         </button>
       </p>
+      <p className="small" style={{ margin: 'var(--sp-3) 0 0' }}>
+        Retiring that device?{' '}
+        <button className="button button-link" type="button">
+          Overwrite it anyway
+        </button>
+      </p>
+    </Frame>
+
+    <Frame label="2 · board occupied, override armed">
+      <div className="alarm" style={{ marginTop: 'var(--sp-4)' }} role="alert">
+        <strong>This board already belongs to another device.</strong>
+        <p style={{ margin: 'var(--sp-2) 0 0' }}>
+          It is holding <span className="mono">EBESEx&hellip;HB0eHw</span>, which is not in your
+          vault. Writing over it would leave that device reporting under credentials nothing can
+          decrypt, permanently. Nothing has been changed yet.
+        </p>
+      </div>
+      <div style={{ marginTop: 'var(--sp-5)' }}>
+        <SubmitButton>Overwrite the board</SubmitButton>
+      </div>
+      <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
+        Leave it as it is?{' '}
+        <button className="button button-link" type="button">
+          Disconnect
+        </button>
+      </p>
     </Frame>
 
     <Frame label="3 · written">
       <div className="success" style={{ marginTop: 'var(--sp-5)' }} role="status">
         <strong>Greenhouse humidity</strong> is in your vault, registered, and written to the
         board. It will start reporting once it is running firmware that uses those credentials.
+        It replaced <span className="mono">EBESEx&hellip;HB0eHw</span>, which is no longer on any
+        hardware and will not report again.
       </div>
     </Frame>
 

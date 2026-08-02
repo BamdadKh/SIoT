@@ -34,6 +34,11 @@ export function AddDevice({ username, onSignOut, signingOut }) {
   const [error, setError] = useState(null);
   const [done, setDone] = useState(null);
 
+  // The occupied-board refusal, deliberately stood down. Never survives a
+  // reconnect or a disconnect: arming it is a statement about the board that is
+  // in front of the person right now, and a different board is a fresh decision.
+  const [overriding, setOverriding] = useState(false);
+
   const session = useRef(null);
 
   // Constant for the life of the tab, so it is read once rather than per render.
@@ -51,6 +56,7 @@ export function AddDevice({ username, onSignOut, signingOut }) {
 
   async function handleConnect() {
     setError(null);
+    setOverriding(false);
 
     let port;
     try {
@@ -151,13 +157,18 @@ export function AddDevice({ username, onSignOut, signingOut }) {
         );
       }
 
-      setDone({ name: stored, wroteToBoard: writeToBoard });
+      // What the write destroyed, if anything, so the confirmation can say so.
+      // Read off the classification rather than `overriding`, because only an
+      // OCCUPIED board had something on it to lose.
+      const replaced = writeToBoard && board?.state === OCCUPIED ? board : null;
+
+      setDone({ name: stored, wroteToBoard: writeToBoard, replaced });
       setStage('done');
     } catch (failure) {
       if (stored !== null) {
         // The vault write landed. Saying nothing happened would be false, and
         // the device really is recoverable from the list.
-        setDone({ name: stored, wroteToBoard: false });
+        setDone({ name: stored, wroteToBoard: false, replaced: null });
         setStage('done');
       }
       setError(describe(failure, stored !== null));
@@ -190,7 +201,10 @@ export function AddDevice({ username, onSignOut, signingOut }) {
       }
       return void (serialSupported ? handleConnect() : handleAdd({ writeToBoard: false }));
     }
-    if (stage === 'board' && board.state !== OCCUPIED) {
+    // An occupied board has no submit at all until the refusal has been stood
+    // down, so Enter cannot overwrite one either: arming it is a click on a
+    // control that says what it does, and nothing else reaches this branch.
+    if (stage === 'board' && (board.state !== OCCUPIED || overriding)) {
       return void handleAdd({ writeToBoard: true });
     }
   }
@@ -199,6 +213,7 @@ export function AddDevice({ username, onSignOut, signingOut }) {
     await release();
     setBoard(null);
     setError(null);
+    setOverriding(false);
     setStage('naming');
   }
 
@@ -246,7 +261,13 @@ export function AddDevice({ username, onSignOut, signingOut }) {
         ) : null}
 
         {stage === 'board' ? (
-          <BoardStage board={board} busy={busy} onDisconnect={handleDisconnect} />
+          <BoardStage
+            board={board}
+            busy={busy}
+            overriding={overriding}
+            onOverride={() => setOverriding(true)}
+            onDisconnect={handleDisconnect}
+          />
         ) : null}
 
         {stage === 'done' ? <DoneStage done={done} /> : null}
@@ -322,12 +343,20 @@ function NamingStage({ named, busy, serialSupported, onSkip }) {
 /**
  * What is already on the board, and design 5.4's decision about it.
  *
- * An occupied board is refused rather than warned about. Overwriting it would
- * leave whatever device that is still reporting, under an identity nothing in
- * the vault can decrypt, with no way to recover it: the board would look fine
- * and the data would be gone. There is no "write anyway" here on purpose.
+ * An occupied board is refused, not warned about: the default state offers no
+ * submit at all, because overwriting leaves whatever device that is with no
+ * hardware carrying its identity and, when the vault has never heard of it, no
+ * way back at all.
+ *
+ * The override is an escape hatch and is shaped like one, the same way revealing
+ * credentials is (design 5.3.1): it is a second deliberate action, it states its
+ * cost at the moment of arming rather than in documentation, and it does not
+ * stay armed. Reconnecting or disconnecting puts the refusal back, because the
+ * judgement being made is about the board currently plugged in and the next
+ * board is a fresh one. What it is not is a path: nothing in the ordinary flow
+ * routes through here, and the recommendation above it does not change.
  */
-function BoardStage({ board, busy, onDisconnect }) {
+function BoardStage({ board, busy, overriding, onOverride, onDisconnect }) {
   if (board.state === OCCUPIED) {
     return (
       <>
@@ -352,21 +381,65 @@ function BoardStage({ board, busy, onDisconnect }) {
               </>
             )}
             . Writing over it would leave that device reporting under credentials nothing can
-            decrypt, permanently. Nothing has been changed. Use a different board, or
-            re-provision that device from its own entry in Devices.
+            decrypt, permanently.{' '}
+            {overriding
+              ? 'Nothing has been changed yet.'
+              : 'Nothing has been changed. Use a different board, or re-provision that device from its own entry in Devices.'}
           </p>
         </div>
-        <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
-          Finished with this board?{' '}
-          <button
-            className="button button-link"
-            type="button"
-            onClick={onDisconnect}
-            disabled={Boolean(busy)}
-          >
-            Disconnect
-          </button>
-        </p>
+
+        {overriding ? (
+          <>
+            {/* Olive like every other action, not rust: the accent rule is not
+                negotiable and rust is the mark, not a danger colour. What makes
+                this read as the heavier choice is the label and the fact that
+                a deliberate action was needed to make it appear at all. */}
+            <div style={{ marginTop: 'var(--sp-5)' }}>
+              <SubmitButton busy={Boolean(busy)} busyLabel={busy}>
+                Overwrite the board
+              </SubmitButton>
+            </div>
+            <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
+              Leave it as it is?{' '}
+              <button
+                className="button button-link"
+                type="button"
+                onClick={onDisconnect}
+                disabled={Boolean(busy)}
+              >
+                Disconnect
+              </button>
+            </p>
+          </>
+        ) : (
+          <>
+            {/* The ordinary way out first, the hatch last. Someone scanning for
+                the way forward should reach "Disconnect" before they reach the
+                thing that destroys a device. */}
+            <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
+              Finished with this board?{' '}
+              <button
+                className="button button-link"
+                type="button"
+                onClick={onDisconnect}
+                disabled={Boolean(busy)}
+              >
+                Disconnect
+              </button>
+            </p>
+            <p className="small" style={{ margin: 'var(--sp-3) 0 0' }}>
+              Retiring that device?{' '}
+              <button
+                className="button button-link"
+                type="button"
+                onClick={onOverride}
+                disabled={Boolean(busy)}
+              >
+                Overwrite it anyway
+              </button>
+            </p>
+          </>
+        )}
       </>
     );
   }
@@ -406,6 +479,23 @@ function DoneStage({ done }) {
     <div className="success" style={{ marginTop: 'var(--sp-5)' }} role="status">
       <strong>{done.name}</strong> is in your vault, registered, and written to the board. It
       will start reporting once it is running firmware that uses those credentials.
+      {/* An override destroyed something. Naming it here is the point: the
+          decision was taken two screens ago and the confirmation is the last
+          place it can be recorded for the person who took it. */}
+      {done.replaced ? (
+        <>
+          {' '}
+          It replaced{' '}
+          {done.replaced.storedName ? (
+            <strong>{done.replaced.storedName}</strong>
+          ) : (
+            <span className="mono" title={done.replaced.storedId}>
+              {shortDeviceId(done.replaced.storedId)}
+            </span>
+          )}
+          , which is no longer on any hardware and will not report again.
+        </>
+      ) : null}
     </div>
   ) : (
     <div className="board-note" style={{ marginTop: 'var(--sp-5)' }} role="status">
