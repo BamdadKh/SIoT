@@ -370,6 +370,118 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > subtly wrong. 17 new cases, and the suite is 81, up from 65. That is still not a test of the
 > screens; `Devices.jsx` itself is uncovered, same gap as the rest of the client.
 
+### 4.9 Device management: rename, delete, and reclaiming the board
+
+> **This is the exit 4.8 shipped without.** That item deliberately renders an orphan as
+> permanently unreadable, which is true and honest, and then leaves it sitting in the list
+> forever with records nothing can open consuming storage nothing can reclaim. An unregistered
+> device has a "Finish registering" button; an orphan has no button at all. Delete is the one
+> that belongs there.
+
+> **A delete is two deletes and they cannot be one transaction.** The vault entry goes by
+> `PUT /vault` and the server row by `DELETE /devices/:id`, and nothing can make those atomic.
+> So the order is chosen the way 4.4 chose the write order: by which half-finished state a
+> person can be left holding. **Server row first.** If the vault write then fails, the device
+> reads as `UNREGISTERED` (in the vault, unknown to the server), a state 4.8 already renders
+> and which costs nothing to retry. Vault entry first, and a failed server delete leaves an
+> `ORPHAN`: records that can never be decrypted, storage that can never be reclaimed, and a
+> `DEVICE_ID` that can never be registered again because the row still holds the primary key.
+> One order is recoverable and the other manufactures exactly the state this item exists to
+> provide an exit from.
+
+- [x] Route `DELETE /devices/:device_id` (authenticated, owner-scoped): a hard delete of the
+      `devices` row. `records` and `grants` need no second statement, since all three foreign
+      keys are already `ON DELETE CASCADE` (`1785456000000_initial-schema.js`,
+      `1785650000000_grants.js`), so the blobs go with the device by construction rather than
+      by a cleanup path someone has to remember to write — `src/routes/devices.ts`, registered
+      inside `requireSession`'s scope like the rest of that file. One statement, with the
+      ownership check in the `where` clause rather than a preceding `select`: same shape as the
+      `last_seq` and `vault_version` compare-and-swaps, so a device that changes hands between
+      a check and a write cannot be deleted on the strength of the check. 204, no body
+- [x] 404 for "not yours" and "does not exist" alike, matching every other cross-owner lookup
+      in `devices.ts`. The client treats that 404 as success when retrying a delete that
+      failed partway: the goal state is "not there", and a delete that already landed is in it
+- [x] No soft delete, no tombstone. A tombstone is a retained record of a device someone asked
+      to erase, and it would hold the `DEVICE_ID` primary key occupied forever, so the id
+      could never be re-registered and the board never cleanly reused
+- [x] Grants cascade in both directions and that is correct, not collateral damage: a grant
+      naming the deleted device as the source wraps a key whose records no longer exist, and
+      one naming it as the recipient is addressed to a device whose `device_data_key` died
+      with its vault entry. Neither is openable by anyone afterwards, so keeping the row would
+      preserve only its metadata (design 13.1 already counts grant edges as server-visible)
+- [ ] Consider batching the record delete ahead of the device row if a long history makes the
+      cascade slow enough to hold locks. Batching is safe *here* specifically because the
+      target state is total removal, so a pass that dies halfway is resumable rather than
+      corrupting. Measure before building it; at v1 record volumes this is very likely a
+      non-issue
+
+> **Batching was considered and deliberately not built**, per the item's own "measure first".
+> Nothing here has a record volume where it could matter yet. What the consideration *did*
+> turn up is a real gap, now closed: Postgres does not index the referencing side of a foreign
+> key automatically, and `grants.device_b_id` had no index. `1785650000000_grants.js` indexed
+> `device_a_id` only, because until this route existed `grants` was only ever read by "grants
+> targeting this device". Both grant columns cascade, so every device delete had to find rows
+> naming it on either side, and the `device_b_id` half was a sequential scan of the whole table
+> while holding the delete's locks. Migration `1785660000000_grants-device-b-index.js` adds it.
+> That is not the batching this item raises; it is the ordinary index a cascading foreign key
+> wants, cheap now and expensive to discover once the table is big enough to feel the scan.
+
+- [ ] A per-device surface for the actions, rather than more buttons on the list row. 4.6's
+      reveal control needs the same home ("on an existing device, never a step in setup"), and
+      three destructive-or-sensitive controls crowded into a row is how a stray click lands on
+      the wrong one. Same reasoning that moved sign-out into `AccountMenu`
+- [ ] Rename in the UI. `renameDevice` has existed in `vault-document.js` since 4.3 and
+      nothing calls it, so the vault holds a name the person can set exactly once, during
+      setup, and never correct
+- [ ] The delete confirmation names what it destroys, in the moment: the device's name, that
+      every record it uploaded is being erased from the only place it exists, and that this
+      cannot be undone by anything the person still holds. Shaped like the occupied-board
+      override (a second deliberate action, not armed by default, not staying armed), because
+      it is the same species of thing
+- [ ] Say that the board keeps running. A dashboard delete does not touch NVS: the firmware
+      still holds `DEVICE_SECRET` and will keep uploading into 404s until someone reprovisions
+      or erases it. A confirmation that implies the hardware was dealt with is lying about
+      where the boundary is
+- [ ] Offer the export (6.4) from the confirmation. It is the only way the readings survive
+      the delete, and the moment someone is about to destroy them is the only moment offering
+      it is useful. Ordering note: if 4.9 lands before 6.4, the confirmation ships without the
+      offer rather than with a dead link
+- [ ] Delete is the only action available on an **orphan**, and it is server-only: there is no
+      vault entry to remove, so the two-step order above collapses to one step
+- [ ] Delete on an **unregistered** device is the mirror image, a pure vault write with no
+      server call, since the server has no row to delete
+- [ ] Optional `SIOT ERASE <expected-id>` in the provisioning sketch, carrying the expected id
+      as the same compare-and-swap `WRITE` does (4.5), so a board swapped between the read and
+      the erase is refused. It adds no exposure `WRITE` does not already have, and it means a
+      retired board stops being a live `DEVICE_SECRET` sitting in flash for a device that no
+      longer exists. Optional because `WRITE` already reclaims a board for a new device; this
+      is for the board going in a drawer
+- [ ] Forward note for 5.6: a 404 from `POST /records` means this device has been deleted and
+      no amount of retrying will change that, so it must not be handled as the same class of
+      failure as a network drop. A deleted device that retries forever is a board flattening
+      its battery against a server that will never accept it
+- [ ] Test: delete a paired device and confirm the records are gone from Postgres, the vault
+      entry is gone, and the `DEVICE_ID` can be registered again; delete an orphan and an
+      unregistered device and confirm each takes its one step and no more; kill the vault
+      write after the server delete and confirm the device lands in `UNREGISTERED` rather than
+      anywhere new; confirm a second account gets 404 deleting the first account's device
+
+> **The server half of that test is done; the halves that need a client are not.** A throwaway
+> Node probe (since deleted, same as 4.5's PowerShell one) drove two accounts, two devices,
+> five records and two grants — one naming the device as source and one as recipient, so both
+> cascade directions were exercised rather than assumed. 20 checks, all passing: records and
+> grants both gone from Postgres and the *other* device's untouched; the device dropped out of
+> `GET /devices` and its records route 404s; an unauthenticated delete 401s, a second account
+> gets 404, a made-up id gets 404, and none of those three deleted anything; a second delete of
+> the same id gets 404 (the idempotency the client leans on); and the `DEVICE_ID` re-registers,
+> comes back at `last_seq` 0, and accepts a record at the `seq` the deleted rows had used, which
+> is the property that makes the id genuinely reusable rather than merely re-insertable.
+>
+> Still untested, because all three need 4.9's client half: the vault entry going, the orphan
+> and unregistered single-step paths, and killing the vault write after the server delete to
+> confirm the device lands in `UNREGISTERED`. No automated test either way; `backend/` still has
+> no harness, same gap as everything since 2.3.
+
 ---
 
 ## Phase 5 — ESP32 Library & Wire Protocol
@@ -462,6 +574,54 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > Left unticked: `frontend/app/` UI work, same as the four items 4.8 left open, and gated by
 > the same CLAUDE.md rule that new UI is Opus-only. `GET /devices/:id/records` (6.2) is done
 > and independently testable, so this is a clean stopping point rather than a partial one.
+
+### 6.4 Downloading records
+
+> **There is no server-side export, and the reflex to add one is exactly what the one rule
+> exists to catch.** A CSV endpoint has to read the readings to know what the columns are, and
+> the server cannot read anything. Export is assembled in the browser out of records 6.3 has
+> already fetched and decrypted, and handed to the disk as a `Blob`; no part of it goes back
+> over the network, and there is no endpoint to add.
+
+> **A file on disk is outside every guarantee in the design document**, in the same way a
+> revealed `DEVICE_SECRET` is (4.6, design 5.3.1). It is plaintext, it is not in the vault, it
+> is backed up by whatever the person's machine backs up to, and nothing here can follow it.
+> That is a legitimate thing to want and it is not a path to shape apologetically, but the
+> cost gets stated at the moment of the export rather than in documentation nobody opens.
+
+- [ ] Walk the whole history rather than exporting the page on screen. `GET /devices/:id/records`
+      is cursor paginated at 500 (6.2), so an export is a loop over `after_seq` and needs
+      real progress: a device reporting every thirty seconds for a year is thousands of round
+      trips, and a silent freeze is indistinguishable from a hang
+- [ ] JSON is the lossless format: per record, `seq`, both timestamps, and the decrypted
+      payload fields, plus a header naming the device, the `DEVICE_ID`, the export time and
+      the `seq` range covered
+- [ ] CSV is the format people actually open: one row per record, columns from the union of
+      reading keys seen across the whole export, blank where a record did not carry a key.
+      Deriving the columns from Phase 7's schema instead becomes possible once schemas exist,
+      but the union is what stays correct for a device whose readings changed shape mid-life
+- [ ] **Two timestamps, labelled as two different things**, never collapsed into one column.
+      The device's own `t` from inside the payload is authenticated but comes from a clock
+      nothing verifies; the server's `created_at` is when the upload arrived and is only as
+      trustworthy as the server. `seq` is the sole authoritative order (design 7.1), so it is
+      what the file is sorted by
+- [ ] Carry 6.3's gap detection into the file rather than leaving it on screen. A CSV whose
+      rows run continuously across a `seq` gap is a lie about the data, and it is the artifact
+      that outlives the UI that told the truth
+- [ ] Count records that opened under no key rather than dropping them, the same discipline
+      `vault-document.js` applies to entries it cannot parse. After a re-provisioning (8.4)
+      the old records are genuinely unopenable, and an export that quietly omitted them would
+      report a shorter history than the device has
+- [ ] Revoke the object URL after the download and hold no copy of the assembled text. It is
+      the same "reveal on demand, do not stay revealed" rule 4.6 states for credentials
+- [ ] Not v1, and worth writing down so it is a decision rather than an omission: an
+      **encrypted archive** (the raw blobs plus metadata, openable only with `DEVICE_SECRET`)
+      is a real backup format and a different feature. It is worthless in the one flow that
+      motivated this (exporting before a delete destroys the vault entry and therefore the
+      key), so the decrypted export is the one that earns its place first
+- [ ] Test: export a device with a deliberate `seq` gap and a record the key will not open,
+      and confirm both are visible in the file and not merely in the UI; confirm the row count
+      matches an unpaged fetch, so the cursor loop is not dropping a page boundary
 
 ---
 

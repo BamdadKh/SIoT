@@ -244,6 +244,17 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   beside the upload timestamps the server already holds is a labelled occupancy log. Renaming
   is an ordinary vault write. A locked vault can show `DEVICE_ID`s and liveness but no names,
   which is the honest rendering of what the client actually knows.
+- **Deleting a device is two deletes, and the server row goes first.** `DELETE /devices/:id`
+  and the vault `PUT` cannot be one transaction, so the order is chosen by which half-finished
+  state a person can be left holding, the same way 4.4 chose the provisioning write order.
+  Server first, and a failed vault write leaves an `UNREGISTERED` device: a state the list
+  already renders, costing nothing to retry. Vault first, and a failed server delete leaves an
+  `ORPHAN`: unreadable records, unreclaimable storage, and a `DEVICE_ID` that can never be
+  registered again because the row still holds the primary key. One order is recoverable; the
+  other manufactures the exact state deletion exists to escape. The delete is hard, with no
+  tombstone: a tombstone is a retained record of a device someone asked to erase, and it would
+  hold the id occupied forever. `records` and `grants` go by `ON DELETE CASCADE`, and grants
+  cascade on *both* columns by design, not by oversight.
 - **Liveness is derived from signed records, and is a lower bound.** The server cannot forge a
   newer record at a higher `seq` (it lacks the signature), so it cannot make a dead device look
   alive; it can withhold and make a live one look dead. Every freshness signal here fails in
@@ -539,6 +550,18 @@ a gap in the code.
 `stage-check.html`/`.jsx` is throwaway scaffolding (rule 4), still earning its place while this
 screen is being iterated on: it renders every stage with fixed props, which is the only quick
 way to look at an occupied board or a half-finished add. Delete it when that stops being true.
+
+**Phase 4.9 has a backend-only slice done: `DELETE /devices/:device_id`.** Authenticated and
+owner-scoped, with the ownership check in the `where` clause of the delete itself rather than a
+preceding `select`, so a device changing hands between check and write cannot be deleted on the
+strength of the check. 204 on success; 404 for "not yours" and "does not exist" alike, which is
+also what makes the client's retry safe (the goal state is "not there", so a delete that already
+landed is in it). `records` and `grants` cascade. Migration
+`1785660000000_grants-device-b-index.js` adds the index `grants.device_b_id` never had: both
+grant columns cascade, and Postgres does not index the referencing side of a foreign key
+automatically, so a device delete was seq-scanning `grants`. Verified by hand with a throwaway
+probe, 20 checks (see the 4.9 roadmap note). The rest of 4.9 is `frontend/app/` and firmware:
+the per-device action surface, rename, the delete confirmation, and the optional `SIOT ERASE`.
 
 **Phase 10, device notifications, is in the roadmap and unbuilt.** Its three load-bearing
 decisions live in ROADMAP.md 10.0 and are the kind that get reversed by accident: a

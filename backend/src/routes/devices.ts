@@ -1,5 +1,5 @@
 /**
- * Device identity routes (design Section 5, roadmap 4.2 and 4.8).
+ * Device identity routes (design Section 5, roadmap 4.2, 4.8 and 4.9).
  *
  * Everything here is a value the design document explicitly permits the server
  * to see in plaintext (Section 5.2): `DEVICE_ID`, `device_sign_pub`, and timing
@@ -152,6 +152,63 @@ export const deviceRoutes: FastifyPluginAsyncTypebox = async (app) => {
           last_seen_at: row.last_seen_at ? row.last_seen_at.toISOString() : null,
         })),
       };
+    },
+  );
+
+  /**
+   * Deletes a device and everything the server holds for it (roadmap 4.9).
+   *
+   * A hard delete, with no soft-delete flag and no tombstone. A tombstone would
+   * be a retained record of a device someone asked to erase, and it would hold
+   * the `device_id` primary key occupied forever — so the id could never be
+   * re-registered and the board never cleanly reused, which is the exit this
+   * route exists to provide.
+   *
+   * `records` and `grants` go with it by construction rather than by a cleanup
+   * path someone has to remember to write: all three foreign keys are already
+   * `ON DELETE CASCADE` (`1785456000000_initial-schema.js`,
+   * `1785650000000_grants.js`). Grants cascade in *both* directions and that is
+   * correct rather than collateral damage — a grant naming this device as the
+   * source wraps a key whose records no longer exist, and one naming it as the
+   * recipient is addressed to a device whose `device_data_key` died with its
+   * vault entry. Neither is openable by anyone afterwards, so keeping the row
+   * would preserve only its metadata (design 13.1 already counts grant edges as
+   * server-visible).
+   *
+   * One statement, with the ownership check in the `where` clause rather than a
+   * preceding `select`: same shape as the `last_seq` and `vault_version`
+   * compare-and-swaps, and for the same reason — a device that changes hands
+   * between a check and a write must not be deleted on the strength of the
+   * check.
+   *
+   * Note this is only half of a delete. The device's `DEVICE_SECRET` and name
+   * live in the vault, which the server cannot touch; the client removes that
+   * entry with a separate `PUT /vault`. The two cannot be one transaction, so
+   * the client does this half *first* — a failed vault write then leaves the
+   * device reading as `UNREGISTERED` (roadmap 4.8), which is recoverable, where
+   * the other order leaves an `ORPHAN`, which is not.
+   */
+  app.delete(
+    '/devices/:device_id',
+    { schema: { params: RecordsParams, response: { 204: Type.Null() } } },
+    async (req, reply) => {
+      const deviceId = decodeBase64Url(req.params.device_id, DEVICE_ID_BYTES);
+
+      const deleted = await app.pg.query(
+        'delete from devices where device_id = $1 and owner_user_id = $2',
+        [deviceId, req.session!.userId],
+      );
+
+      // 404 for "not yours" and "does not exist" alike, matching every other
+      // cross-owner lookup in this file. Answering 204 for an id that was never
+      // here would make a stranger's live device (404) distinguishable from a
+      // made-up one, which is the distinction the shared message exists to
+      // deny. The client covers idempotency instead: retrying a delete that
+      // already landed gets a 404, and the goal state is "not there", so it
+      // treats that as success.
+      if (deleted.rowCount === 0) throw httpError(404, 'unknown device_id');
+
+      return reply.code(204).send(null);
     },
   );
 
