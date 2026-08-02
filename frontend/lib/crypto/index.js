@@ -19,6 +19,37 @@ export {
   VAULT_KEY_BYTES,
 } from './vault-key.js';
 export { encryptVault, decryptVault, VAULT_BLOB_OVERHEAD_BYTES } from './vault.js';
+export {
+  ed25519PublicKeyFromSeed,
+  ed25519Sign,
+  ED25519_SEED_BYTES,
+  ED25519_PUBLIC_KEY_BYTES,
+  ED25519_SIGNATURE_BYTES,
+} from './ed25519.js';
+export {
+  generateDevice,
+  generateDeviceId,
+  generateDeviceSecret,
+  deriveDeviceKeys,
+  deriveDeviceDataKey,
+  deriveDeviceSignSeed,
+  DEVICE_ID_BYTES,
+  DEVICE_SECRET_BYTES,
+} from './device.js';
+export {
+  emptyVaultDocument,
+  normaliseVaultDocument,
+  normaliseDeviceName,
+  listDevices,
+  findDevice,
+  addDevice,
+  renameDevice,
+  removeDevice,
+  deviceSecretBytes,
+  deviceIdBytes,
+  VAULT_DOCUMENT_VERSION,
+  DEVICE_NAME_MAX_LENGTH,
+} from './vault-document.js';
 
 import { deriveMasterKey } from './argon2.js';
 import { deriveLoginKey, deriveKek } from './hkdf.js';
