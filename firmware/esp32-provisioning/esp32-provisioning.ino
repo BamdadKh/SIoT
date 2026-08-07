@@ -33,6 +33,15 @@
  *     -> SIOT ERR STALE <stored-id|->
  *     -> SIOT ERR ...
  *
+ *   SIOT ERASE <expected-id>
+ *     -> SIOT OK
+ *     -> SIOT ERR STALE <stored-id|->
+ *     Removes both values. Carries the same compare-and-swap `WRITE` does, for
+ *     the same reason: a board swapped between the read and the erase must not
+ *     be wiped on the strength of a check computed for a different one. There is
+ *     deliberately no "erase whatever is there" form; a blank expectation is
+ *     refused rather than treated as a wildcard.
+ *
  * `WRITE` carries the id the tool believes is already on the board, and the
  * write only happens if that is still what is there: a compare-and-swap, the
  * same shape as the `vault_version` and `last_seq` swaps on the server. Design
@@ -308,6 +317,71 @@ static void handleWrite(char *args) {
   ok();
 }
 
+/*
+ * Retires a board: both values gone, nothing left in flash for the device that
+ * used to live here (roadmap 4.9).
+ *
+ * `WRITE` already reclaims a board for a *new* device, so this is for the board
+ * that is going in a drawer rather than into another project. It adds no
+ * exposure `WRITE` does not already have (anyone who can reach this port can
+ * already overwrite the credentials, which destroys them just as thoroughly),
+ * and it means a retired board stops being a live DEVICE_SECRET sitting in
+ * flash for a device that no longer exists.
+ *
+ * The expectation is required and `-` is not accepted. An erase with no
+ * expectation would be a command that wipes whatever board happens to be
+ * plugged in, which is precisely the shape the compare-and-swap exists to
+ * refuse; and there is nothing to erase on a blank board anyway.
+ */
+static void handleErase(char *args) {
+  char *expectedText = strtok(args, " ");
+  if (expectedText == nullptr || strtok(nullptr, " ") != nullptr) {
+    err("BAD-ARGS", "expected: ERASE <expected-id>");
+    return;
+  }
+
+  uint8_t expected[DEVICE_ID_BYTES];
+  if (!b64urlDecodeExact(expectedText, expected, DEVICE_ID_BYTES)) {
+    err("BAD-LENGTH", "expected-id must be 16 bytes of base64url");
+    return;
+  }
+
+  if (!openStore()) {
+    err("NVS", "could not open the siot partition");
+    return;
+  }
+
+  uint8_t stored[DEVICE_ID_BYTES];
+  const bool present = loadStoredId(stored);
+  if (!present || memcmp(stored, expected, DEVICE_ID_BYTES) != 0) {
+    char text[ID_TEXT_LEN + 1] = "-";
+    if (present) b64urlEncode(stored, DEVICE_ID_BYTES, text);
+    store.end();
+    err("STALE", text);
+    return;
+  }
+
+  /* The secret goes first. If the two removals are interrupted between them, a
+     board with an id and no secret is the recoverable state: it reads as
+     occupied, so nothing overwrites it silently, and a re-erase or a WRITE
+     finishes the job. The other order leaves a secret with no id, which reads
+     as blank and would be quietly written over while still holding the old
+     secret in flash. */
+  const bool cleared = store.remove(KEY_SECRET) && store.remove(KEY_ID);
+
+  /* Verified by reading back, the same way WRITE verifies itself: an API that
+     returned success is not evidence that flash changed. */
+  const bool verified = cleared && store.getBytesLength(KEY_ID) == 0 &&
+                        store.getBytesLength(KEY_SECRET) == 0;
+  store.end();
+
+  if (!verified) {
+    err("NVS", "the erase did not read back");
+    return;
+  }
+  ok();
+}
+
 static void handleLine(char *text) {
   /* Everything that is not addressed to us is noise, not an error. The port is
      shared with the ROM bootloader's own output and with whatever a serial
@@ -328,6 +402,8 @@ static void handleLine(char *text) {
     handleReadId();
   } else if (strcmp(command, "WRITE") == 0) {
     handleWrite(args == nullptr ? (char *)"" : args);
+  } else if (strcmp(command, "ERASE") == 0) {
+    handleErase(args == nullptr ? (char *)"" : args);
   } else {
     err("BAD-COMMAND", command);
   }

@@ -11,6 +11,7 @@ import {
   helloCommand,
   readIdCommand,
   writeCommand,
+  eraseCommand,
   parseResponse,
   isSupportedBanner,
   storedIdFrom,
@@ -47,6 +48,19 @@ test('a write to an occupied board carries the id that was read', () => {
 test('a write with nothing to write is refused before it reaches the wire', () => {
   assert.throws(() => writeCommand(null, '', SECRET), TypeError);
   assert.throws(() => writeCommand(null, ID_A, ''), TypeError);
+});
+
+test('an erase carries the id the board is expected to be holding', () => {
+  assert.equal(eraseCommand(ID_A), `SIOT ERASE ${ID_A}`);
+});
+
+test('an erase with no expectation is refused before it reaches the wire', () => {
+  // There is deliberately no "erase whatever is there" form. A wildcard erase is
+  // a command that wipes whichever board happens to be plugged in, which is the
+  // shape the compare-and-swap exists to refuse.
+  assert.throws(() => eraseCommand(null), TypeError);
+  assert.throws(() => eraseCommand(''), TypeError);
+  assert.throws(() => eraseCommand(NO_ID), TypeError);
 });
 
 /* --- responses ----------------------------------------------------------- */
@@ -192,6 +206,8 @@ test('an unrecognised code still says something rather than nothing', () => {
 test('STALE and NVS both promise that nothing was written', () => {
   // Both are refusals before or instead of a write, and the person needs to know
   // their vault and their board have not diverged.
-  assert.match(describeError({ ok: false, code: 'STALE', detail: ID_A }), /[Nn]othing was written/);
-  assert.match(describeError({ ok: false, code: 'NVS', detail: null }), /[Nn]othing was written/);
+  // Worded to cover the erase as well as the write, since both refusals mean the
+  // same thing to a reader: the board is as it was.
+  assert.match(describeError({ ok: false, code: 'STALE', detail: ID_A }), /[Nn]othing on it was changed/);
+  assert.match(describeError({ ok: false, code: 'NVS', detail: null }), /[Nn]othing on it was changed/);
 });
