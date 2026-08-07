@@ -13,19 +13,20 @@
  */
 export function RollbackWarning({ serverVersion, cached }) {
   return (
-    <section className="rollback-warning">
+    <section className="rollback-warning stack stack-3">
+      {/* Absolutely positioned, so they sit outside the stack's flow. */}
       <span className="tick tick-tl" />
       <span className="tick tick-tr" />
       <span className="tick tick-bl" />
       <span className="tick tick-br" />
       <h2 className="h3">This vault went backwards</h2>
-      <p className="prose" style={{ marginTop: 'var(--sp-3)' }}>
+      <p className="prose">
         The server just returned vault version <span className="mono">{serverVersion}</span>, but
         this browser has already seen version <span className="mono">{cached}</span>. That can only
         happen if the server served an old copy of your vault, either by mistake or on purpose.
         Nothing has been decrypted or trusted.
       </p>
-      <p className="prose" style={{ marginTop: 'var(--sp-3)' }}>
+      <p className="prose">
         Do not make changes to devices or credentials from this browser until this is resolved.
       </p>
     </section>

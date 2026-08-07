@@ -144,6 +144,31 @@ export function fetchDevices() {
 }
 
 /**
+ * Removes the server's half of a device: the row, and by cascade every record
+ * it uploaded and every grant naming it on either side.
+ *
+ * This is only half of a delete. The `DEVICE_SECRET` and the name live in the
+ * vault and go by a separate `PUT /vault`, and nothing can make the two atomic;
+ * roadmap 4.9 chooses the order by which half-finished state is survivable.
+ *
+ * **A 404 counts as success.** The endpoint answers 404 for "not yours" and
+ * "does not exist" alike, and the goal state here is *absence*: a delete that
+ * already landed is already in it. That is what makes retrying a two-step delete
+ * that failed partway safe, rather than a second attempt reporting a failure
+ * that has in fact been achieved.
+ *
+ * @param {string} deviceId base64url
+ */
+export async function deleteDevice(deviceId) {
+  try {
+    await request('DELETE', `/devices/${encodeURIComponent(deviceId)}`);
+  } catch (failure) {
+    if (failure instanceof ApiError && failure.status === 404) return;
+    throw failure;
+  }
+}
+
+/**
  * Rotates the account password: a fresh salt, a new `login_key`, and the
  * existing `vault_key` re-wrapped under the new `kek`. Vault contents are
  * untouched. The server re-verifies `current_login_key` against the stored

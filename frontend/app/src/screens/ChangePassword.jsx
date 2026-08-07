@@ -8,8 +8,9 @@ import {
 } from '@siot/crypto';
 import { ApiError, changePassword, fetchSalt } from '../lib/api.js';
 import { getVaultKey } from '../lib/keyring.js';
-import { Link } from '../lib/router.jsx';
 import { Plate } from '../components/Plate.jsx';
+import { PlateHead } from '../components/PlateHead.jsx';
+import { SessionFooter } from '../components/PlateFoot.jsx';
 import { Field } from '../components/Field.jsx';
 import { SubmitButton } from '../components/SubmitButton.jsx';
 
@@ -121,17 +122,13 @@ export function ChangePassword({ username, onSignOut, signingOut }) {
 
   return (
     <Plate>
-      <div className="wordmark" style={{ marginBottom: 'var(--sp-5)' }}>
-        SIoT
-      </div>
-      <h1 className="h1">Change password</h1>
-      <p className="prose" style={{ marginTop: 'var(--sp-3)' }}>
+      <PlateHead title="Change password">
         This trades your current password for a new one. There is still no reset, so losing the
         new one loses the vault the same way losing the old one would.
-      </p>
+      </PlateHead>
 
-      <form onSubmit={handleSubmit}>
-        <div className="stack" style={{ gap: 'var(--sp-4)', marginTop: 'var(--sp-5)' }}>
+      <form className="stack stack-5" onSubmit={handleSubmit}>
+        <div className="stack stack-4">
           <Field
             label="Current password"
             type="password"
@@ -160,38 +157,23 @@ export function ChangePassword({ username, onSignOut, signingOut }) {
         </div>
 
         {error ? (
-          <p className="alarm" style={{ marginTop: 'var(--sp-4)' }} role="alert">
+          <p className="alarm" role="alert">
             {error}
           </p>
         ) : null}
 
         {done ? (
-          <p className="success" style={{ marginTop: 'var(--sp-4)' }} role="status">
+          <p className="success" role="status">
             Password changed. Use the new one next time you unlock.
           </p>
         ) : null}
 
-        <div style={{ marginTop: 'var(--sp-5)' }}>
-          <SubmitButton busy={Boolean(busy)} busyLabel={busy} disabled={!canSubmit}>
-            Change password
-          </SubmitButton>
-        </div>
+        <SubmitButton busy={Boolean(busy)} busyLabel={busy} disabled={!canSubmit}>
+          Change password
+        </SubmitButton>
       </form>
 
-      <hr className="rule" style={{ margin: 'var(--sp-6) 0 18px' }} />
-      <div className="row spread">
-        <span className="small">
-          Signed in as <span className="mono">{username}</span>
-        </span>
-        <div className="row" style={{ gap: 'var(--sp-4)' }}>
-          <Link to="/" className="button button-link">
-            Devices
-          </Link>
-          <button className="button button-link" type="button" onClick={onSignOut} disabled={signingOut}>
-            {signingOut ? 'Signing out' : 'Sign out'}
-          </button>
-        </div>
-      </div>
+      <SessionFooter username={username} onSignOut={onSignOut} signingOut={signingOut} />
     </Plate>
   );
 }

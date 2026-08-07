@@ -9,6 +9,8 @@ import {
 import { ApiError, signUp } from '../lib/api.js';
 import { Link, navigate } from '../lib/router.jsx';
 import { Plate } from '../components/Plate.jsx';
+import { PlateHead } from '../components/PlateHead.jsx';
+import { PlateFoot } from '../components/PlateFoot.jsx';
 import { Field } from '../components/Field.jsx';
 import { SubmitButton } from '../components/SubmitButton.jsx';
 
@@ -85,17 +87,13 @@ export function SignUp({ onSignedUp }) {
 
   return (
     <Plate>
-      <div className="wordmark" style={{ marginBottom: 'var(--sp-5)' }}>
-        SIoT
-      </div>
-      <h1 className="h1">Create an account</h1>
-      <p className="prose" style={{ marginTop: 'var(--sp-3)' }}>
-        Your password cannot be reset. It is the only thing that opens your data, and no copy
-        of it reaches the server.
-      </p>
+      <PlateHead title="Create an account">
+        Your password cannot be reset. It is the only thing that opens your data, and no copy of
+        it reaches the server.
+      </PlateHead>
 
-      <form onSubmit={handleSubmit}>
-        <div className="stack" style={{ gap: 'var(--sp-4)', marginTop: 'var(--sp-5)' }}>
+      <form className="stack stack-5" onSubmit={handleSubmit}>
+        <div className="stack stack-4">
           <Field
             label="Username"
             value={username}
@@ -123,22 +121,21 @@ export function SignUp({ onSignedUp }) {
         </div>
 
         {error ? (
-          <p className="alarm" style={{ marginTop: 'var(--sp-4)' }} role="alert">
+          <p className="alarm" role="alert">
             {error}
           </p>
         ) : null}
 
-        <div style={{ marginTop: 'var(--sp-5)' }}>
-          <SubmitButton busy={Boolean(busy)} busyLabel={busy} disabled={!canSubmit}>
-            Create account
-          </SubmitButton>
-        </div>
+        <SubmitButton busy={Boolean(busy)} busyLabel={busy} disabled={!canSubmit}>
+          Create account
+        </SubmitButton>
       </form>
 
-      <hr className="rule" style={{ margin: 'var(--sp-6) 0 18px' }} />
-      <p className="small" style={{ margin: 0 }}>
-        Already have one? <Link to="/sign-in">Sign in</Link>
-      </p>
+      <PlateFoot>
+        <p className="small">
+          Already have one? <Link to="/sign-in">Sign in</Link>
+        </p>
+      </PlateFoot>
     </Plate>
   );
 }

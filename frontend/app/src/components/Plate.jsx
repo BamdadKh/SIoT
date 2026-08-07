@@ -1,7 +1,10 @@
 /**
- * The centred panel the signed-out screens sit on, with its registration ticks.
- * The top-left tick is the datum and is drawn in rust; the other three are plain
- * olive registration. See `.tick-*` in base.css.
+ * The centred panel a single-purpose screen sits on, with its registration ticks.
+ *
+ * All four ticks are identical and all four are rust, on every screen and in
+ * every state. The plate chrome never carries status: locked, busy and failed
+ * are said by the heading and the control, where someone is already looking.
+ * See `.tick-*` in base.css.
  */
 export function Plate({ children }) {
   return (
