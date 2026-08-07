@@ -36,6 +36,20 @@ export {
   DEVICE_ID_BYTES,
   DEVICE_SECRET_BYTES,
 } from './device.js';
+export { encodeCbor, decodeCbor } from './cbor.js';
+export {
+  composeSeq,
+  seqToBytes,
+  buildNonce,
+  buildRecordAad,
+  recordSigningInput,
+  encryptRecord,
+  decryptRecord,
+  PROTOCOL_VERSION,
+  RECORD_TYPE_V1,
+  NONCE_BYTES,
+  RECORD_AAD_BYTES,
+} from './record.js';
 export {
   emptyVaultDocument,
   normaliseVaultDocument,
