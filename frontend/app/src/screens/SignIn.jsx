@@ -4,6 +4,8 @@ import { ApiError, fetchSalt, fetchWrappedVaultKey, logIn } from '../lib/api.js'
 import { unlock } from '../lib/keyring.js';
 import { Link } from '../lib/router.jsx';
 import { Plate } from '../components/Plate.jsx';
+import { PlateHead } from '../components/PlateHead.jsx';
+import { PlateFoot } from '../components/PlateFoot.jsx';
 import { Field } from '../components/Field.jsx';
 import { SubmitButton } from '../components/SubmitButton.jsx';
 
@@ -67,13 +69,10 @@ export function SignIn({ initialUsername = '', onSignedIn }) {
 
   return (
     <Plate>
-      <div className="wordmark" style={{ marginBottom: 'var(--sp-5)' }}>
-        SIoT
-      </div>
-      <h1 className="h1">Sign in</h1>
+      <PlateHead title="Sign in" />
 
-      <form onSubmit={handleSubmit}>
-        <div className="stack" style={{ gap: 'var(--sp-4)', marginTop: 'var(--sp-6)' }}>
+      <form className="stack stack-5" onSubmit={handleSubmit}>
+        <div className="stack stack-4">
           <Field
             label="Username"
             value={username}
@@ -93,22 +92,21 @@ export function SignIn({ initialUsername = '', onSignedIn }) {
         </div>
 
         {error ? (
-          <p className="alarm" style={{ marginTop: 'var(--sp-4)' }} role="alert">
+          <p className="alarm" role="alert">
             {error}
           </p>
         ) : null}
 
-        <div style={{ marginTop: 'var(--sp-6)' }}>
-          <SubmitButton busy={Boolean(busy)} busyLabel={busy} disabled={!canSubmit}>
-            Sign in
-          </SubmitButton>
-        </div>
+        <SubmitButton busy={Boolean(busy)} busyLabel={busy} disabled={!canSubmit}>
+          Sign in
+        </SubmitButton>
       </form>
 
-      <hr className="rule" style={{ margin: 'var(--sp-6) 0 18px' }} />
-      <p className="small" style={{ margin: 0 }}>
-        No account yet? <Link to="/sign-up">Create one</Link>
-      </p>
+      <PlateFoot>
+        <p className="small">
+          No account yet? <Link to="/sign-up">Create one</Link>
+        </p>
+      </PlateFoot>
     </Plate>
   );
 }

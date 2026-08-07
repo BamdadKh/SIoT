@@ -3,6 +3,8 @@ import { deriveAccountKeys, fromBase64Url, unwrapVaultKey } from '@siot/crypto';
 import { ApiError, fetchSalt, fetchWrappedVaultKey } from '../lib/api.js';
 import { unlock } from '../lib/keyring.js';
 import { Plate } from '../components/Plate.jsx';
+import { PlateHead } from '../components/PlateHead.jsx';
+import { SessionFooter } from '../components/PlateFoot.jsx';
 import { Field } from '../components/Field.jsx';
 import { SubmitButton } from '../components/SubmitButton.jsx';
 
@@ -61,49 +63,41 @@ export function Unlock({ username, onUnlocked, onSignOut, signingOut }) {
 
   return (
     <Plate>
-      <div className="wordmark" style={{ marginBottom: 'var(--sp-5)' }}>
-        SIoT
-      </div>
-      <h1 className="h1">Vault locked</h1>
-      <p className="prose" style={{ marginTop: 'var(--sp-3)' }}>
+      <PlateHead title="Vault locked">
         Reloading cleared the key that opens your data. Enter your password to unlock it.
-      </p>
+      </PlateHead>
 
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginTop: 'var(--sp-5)' }}>
-          <Field
-            label="Password"
-            type="password"
-            value={password}
-            onChange={setPassword}
-            disabled={Boolean(busy)}
-            autoComplete="current-password"
-            autoFocus
-          />
-        </div>
+      <form className="stack stack-5" onSubmit={handleSubmit}>
+        <Field
+          label="Password"
+          type="password"
+          value={password}
+          onChange={setPassword}
+          disabled={Boolean(busy)}
+          autoComplete="current-password"
+          autoFocus
+        />
 
         {error ? (
-          <p className="alarm" style={{ marginTop: 'var(--sp-4)' }} role="alert">
+          <p className="alarm" role="alert">
             {error}
           </p>
         ) : null}
 
-        <div style={{ marginTop: 'var(--sp-5)' }}>
-          <SubmitButton busy={Boolean(busy)} busyLabel={busy} disabled={password.length === 0}>
-            Unlock
-          </SubmitButton>
-        </div>
+        <SubmitButton busy={Boolean(busy)} busyLabel={busy} disabled={password.length === 0}>
+          Unlock
+        </SubmitButton>
       </form>
 
-      <hr className="rule" style={{ margin: 'var(--sp-6) 0 18px' }} />
-      <div className="row spread">
-        <span className="small">
-          Signed in as <span className="mono">{username}</span>
-        </span>
-        <button className="button button-link" type="button" onClick={onSignOut} disabled={signingOut}>
-          {signingOut ? 'Signing out' : 'Sign out'}
-        </button>
-      </div>
+      {/* No way through to Devices from here: the vault is sealed, so that
+          screen has nothing to show and would send anyone who followed it
+          straight back to this one. */}
+      <SessionFooter
+        username={username}
+        onSignOut={onSignOut}
+        signingOut={signingOut}
+        home={false}
+      />
     </Plate>
   );
 }

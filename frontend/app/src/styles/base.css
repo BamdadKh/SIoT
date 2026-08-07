@@ -49,6 +49,34 @@ a:hover {
   outline-offset: 2px;
 }
 
+/* The one place a colour appears without being asked for, so it uses the accent
+   that means "this is yours to act on" rather than the browser's blue. */
+::selection {
+  background: var(--olive-halo);
+  color: var(--ink);
+}
+
+/* Short and only on the two properties that change. The interface is flat and
+   precise on purpose; this is enough to make a control feel answered rather
+   than switched, and not enough to make anything feel animated. */
+.button,
+.account-item,
+.field-input {
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button,
+  .account-item,
+  .field-input {
+    transition: none;
+  }
+}
+
 /* --- type ---------------------------------------------------------------- */
 
 .wordmark {
@@ -69,6 +97,11 @@ a:hover {
   letter-spacing: -0.025em;
   margin: 0;
   color: var(--ink);
+  /* Headings are short enough for the browser to balance them cheaply, and a
+     two-line heading whose second line is one word is the most visible thing on
+     a plate. `.prose` keeps `pretty` from the body rule, which is the right
+     trade for a paragraph. */
+  text-wrap: balance;
 }
 
 .h1 {
@@ -141,6 +174,38 @@ a:hover {
   align-items: center;
   justify-content: center;
   padding: var(--sp-5);
+}
+
+/* Every plate opens the same way: the mark, the heading, and at most one
+   paragraph saying what this screen costs or protects. The spacing lives here
+   rather than on each screen because five screens setting their own margins is
+   how "Sign in" ended up sitting one step further from its fields than "Unlock"
+   did, for no reason anyone chose. */
+.plate-head {
+  margin-bottom: var(--sp-6);
+}
+
+.plate-head .wordmark {
+  display: block;
+  margin-bottom: var(--sp-5);
+}
+
+.plate-head .prose {
+  margin-top: var(--sp-3);
+}
+
+/* The way out of a plate: a rule, then whatever the screen offers below it.
+   A border rather than an <hr>, so the spacing above and below is one
+   declaration instead of a margin shorthand every screen copied slightly
+   differently. */
+.plate-foot {
+  margin-top: var(--sp-6);
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.plate-foot p {
+  margin: 0;
 }
 
 .tick {
@@ -408,6 +473,31 @@ a:hover {
 
 .unreadable .mono {
   color: inherit;
+}
+
+/*
+ * Paragraph rhythm inside any member of the status family.
+ *
+ * A panel that says one thing is a sentence; a panel arming a delete or stating
+ * what a revealed secret costs is three, and they were spaced by a hand-written
+ * `margin: var(--sp-2) 0 0` on each. Here once, so every panel in the app breaks
+ * its paragraphs at the same distance and the first one never carries a stray
+ * top margin.
+ */
+.alarm > p,
+.success > p,
+.board-note > p,
+.unreadable > p,
+.device-note > p {
+  margin: 0;
+}
+
+.alarm > * + p,
+.success > * + p,
+.board-note > * + p,
+.unreadable > * + p,
+.device-note > * + p {
+  margin-top: var(--sp-2);
 }
 
 /* A vault the client refuses to open uses rust, not alarm. `--alarm` is for a
@@ -738,11 +828,83 @@ a:hover {
   margin-top: var(--sp-8);
 }
 
+/* The line under a section heading saying what the section is for. One rule so
+   every section on the page starts at the same distance from its own title. */
+.section-lede {
+  margin: var(--sp-3) 0 var(--sp-4);
+}
+
+/* --- revealed credentials (design 5.3.1) --------------------------------- */
+
+/*
+ * The values themselves, in the input field's ground and rule: they are a
+ * readable, copyable value rather than a statement, and dressing them as a
+ * field is the closest true thing. Mono, because these are the machine's bytes
+ * in the most literal sense in the whole app.
+ */
+.credential-value {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  border: 1px solid var(--line-control);
+  background: var(--surface-input);
+  padding: 10px var(--sp-3);
+}
+
+.credential-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--size-mono);
+  letter-spacing: -0.03em;
+  line-height: 1.7;
+  color: var(--ink);
+  /* 43 characters of base64url with no natural break in them. */
+  overflow-wrap: anywhere;
+  /* A secret is selected far more often than it is read, so make the whole run
+     one target rather than something to drag across accurately. */
+  user-select: all;
+}
+
+/* The copy control keeps the one link appearance, and it must not wrap to a
+   second line when the value beside it does. */
+.credential-copy {
+  flex: 0 0 auto;
+  /* Optical alignment with the first line of the value, which sits on a 1.7
+     line box against this control's 1.0. */
+  padding-top: 1px;
+}
+
 /* --- layout helpers ------------------------------------------------------ */
 
 .stack {
   display: flex;
   flex-direction: column;
+}
+
+/*
+ * The vertical rhythm, as three steps rather than a margin on every element.
+ *
+ * A stack owns the space between its children, so a screen adds a panel or
+ * removes one and nothing above or below has to be adjusted to match. The
+ * alternative, which this replaced, was `style={{ marginTop: 'var(--sp-4)' }}`
+ * on each block in turn: it drifted, and the drift was invisible until two
+ * screens were opened side by side.
+ *
+ *   4  between fields in one group
+ *   5  between the blocks of a form: the fields, a status panel, the button
+ *   3  a tighter pair, where two lines belong to each other
+ */
+.stack-3 {
+  gap: var(--sp-3);
+}
+
+.stack-4 {
+  gap: var(--sp-4);
+}
+
+.stack-5 {
+  gap: var(--sp-5);
 }
 
 .row {
@@ -752,4 +914,71 @@ a:hover {
 
 .spread {
   justify-content: space-between;
+}
+
+/* Two or three link-controls sitting together in a footer row. */
+.row-links {
+  gap: var(--sp-4);
+}
+
+/* --- narrow screens ------------------------------------------------------ */
+
+/*
+ * One breakpoint, and it only undoes things that assume horizontal room.
+ *
+ * Everything above is already fluid (the plate is `max-width: 100%`, the page
+ * is a centred column), so this is not a second layout. It is the three places
+ * that put two things side by side and stop working when there is room for one:
+ * the device row's liveness column, the specification list's label column, and
+ * the gutters, which are set for a page rather than for a phone.
+ */
+@media (max-width: 560px) {
+  .page,
+  .topbar {
+    padding-left: var(--sp-4);
+    padding-right: var(--sp-4);
+  }
+
+  .page {
+    padding-top: var(--sp-6);
+    padding-bottom: var(--sp-6);
+  }
+
+  .plate {
+    padding: var(--sp-6) var(--sp-5) var(--sp-5);
+  }
+
+  /* The account trigger's negative margin exists to pull its text onto the
+     28px gutter, which is not where the gutter is any more. */
+  .account-trigger {
+    margin-right: -6px;
+  }
+
+  /* Last heard from moves under the name rather than fighting it for width. */
+  .device {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .device-liveness {
+    justify-self: start;
+    text-align: left;
+  }
+
+  /* A `max-content` label column and a 22-character value do not both fit. */
+  .spec {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-1) 0;
+  }
+
+  .spec dd + dt {
+    margin-top: var(--sp-4);
+  }
+
+  .rollback-warning {
+    padding: var(--sp-5) var(--sp-4);
+  }
+
+  .slot {
+    padding: var(--sp-7) var(--sp-4);
+  }
 }

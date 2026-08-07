@@ -51,12 +51,12 @@ export function UnregisteredNote({ device, vaultDocument, onRegistered, classNam
   }
 
   return (
-    <div className={className}>
-      <p style={{ margin: 0 }}>
+    <div className={`${className} stack stack-3`}>
+      <p>
         This device is in your vault but the server has never heard of it, so it cannot upload
         anything. Its secret is safe: registering again is all that is missing.
       </p>
-      <div className="row" style={{ gap: 'var(--sp-4)', marginTop: 'var(--sp-3)' }}>
+      <div className="row row-links">
         <button className="button button-inline" type="button" onClick={handleRegister} disabled={busy}>
           {busy ? 'Registering' : 'Finish registering'}
         </button>

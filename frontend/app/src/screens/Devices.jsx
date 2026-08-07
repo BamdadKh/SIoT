@@ -43,48 +43,53 @@ export function Devices({ username, onSignOut, signingOut }) {
           </div>
         ) : null}
 
-        {state.status === 'rollback' ? (
-          <RollbackWarning serverVersion={state.serverVersion} cached={state.cached} />
-        ) : null}
+        {/* One stack, so a warning appearing above the list moves it down by the
+            same step everywhere in the app rather than by a margin written on
+            whichever panel happened to need one. */}
+        <div className="stack stack-4">
+          {state.status === 'rollback' ? (
+            <RollbackWarning serverVersion={state.serverVersion} cached={state.cached} />
+          ) : null}
 
-        {state.status === 'error' ? (
-          <p className="alarm" role="alert">
-            Could not check the vault: {state.message}
-          </p>
-        ) : null}
+          {state.status === 'error' ? (
+            <p className="alarm" role="alert">
+              Could not check the vault: {state.message}
+            </p>
+          ) : null}
 
-        {state.status === 'ok' && state.dropped > 0 ? (
-          <p className="alarm" style={{ marginBottom: 'var(--sp-4)' }} role="alert">
-            {state.dropped} {state.dropped === 1 ? 'entry' : 'entries'} in your vault could not be
-            read and {state.dropped === 1 ? 'was' : 'were'} skipped. The vault itself is intact and
-            authentic, so this is a fault in the client that wrote {state.dropped === 1 ? 'it' : 'them'},
-            not tampering.
-          </p>
-        ) : null}
+          {state.status === 'ok' && state.dropped > 0 ? (
+            <p className="alarm" role="alert">
+              {state.dropped} {state.dropped === 1 ? 'entry' : 'entries'} in your vault could not be
+              read and {state.dropped === 1 ? 'was' : 'were'} skipped. The vault itself is intact
+              and authentic, so this is a fault in the client that wrote{' '}
+              {state.dropped === 1 ? 'it' : 'them'}, not tampering.
+            </p>
+          ) : null}
 
-        {state.status === 'ok' && state.devices.length === 0 ? (
-          <section className="slot">
-            <span className="tick tick-tl" />
-            <span className="tick tick-tr" />
-            <span className="tick tick-bl" />
-            <span className="tick tick-br" />
-            <h2 className="h3">No devices yet</h2>
-            <p className="prose">Name one and this browser will mint its keys locally.</p>
-          </section>
-        ) : null}
+          {state.status === 'ok' && state.devices.length === 0 ? (
+            <section className="slot">
+              <span className="tick tick-tl" />
+              <span className="tick tick-tr" />
+              <span className="tick tick-bl" />
+              <span className="tick tick-br" />
+              <h2 className="h3">No devices yet</h2>
+              <p className="prose">Name one and this browser will mint its keys locally.</p>
+            </section>
+          ) : null}
 
-        {state.status === 'ok' && state.devices.length > 0 ? (
-          <ul className="device-list">
-            {state.devices.map((device) => (
-              <DeviceRow
-                key={device.id}
-                device={device}
-                vaultDocument={state.document}
-                onRegistered={reload}
-              />
-            ))}
-          </ul>
-        ) : null}
+          {state.status === 'ok' && state.devices.length > 0 ? (
+            <ul className="device-list">
+              {state.devices.map((device) => (
+                <DeviceRow
+                  key={device.id}
+                  device={device}
+                  vaultDocument={state.document}
+                  onRegistered={reload}
+                />
+              ))}
+            </ul>
+          ) : null}
+        </div>
       </main>
     </>
   );

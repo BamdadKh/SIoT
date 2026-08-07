@@ -5,8 +5,9 @@ import { loadVault, storeVault, VaultRollbackError } from '../lib/vault-store.js
 import { isWebSerialSupported, requestPort, ProvisioningSession } from '../lib/web-serial.js';
 import { classifyBoard, BLANK, SAME, OCCUPIED } from '../lib/provisioning-protocol.js';
 import { shortDeviceId } from '../lib/device-list.js';
-import { Link } from '../lib/router.jsx';
 import { Plate } from '../components/Plate.jsx';
+import { PlateHead } from '../components/PlateHead.jsx';
+import { SessionFooter } from '../components/PlateFoot.jsx';
 import { Field } from '../components/Field.jsx';
 import { SubmitButton } from '../components/SubmitButton.jsx';
 
@@ -219,34 +220,28 @@ export function AddDevice({ username, onSignOut, signingOut }) {
 
   return (
     <Plate>
-      <div className="wordmark" style={{ marginBottom: 'var(--sp-5)' }}>
-        SIoT
-      </div>
-      <h1 className="h1">Add a device</h1>
-      <p className="prose" style={{ marginTop: 'var(--sp-3)' }}>
+      <PlateHead title="Add a device">
         The name is stored in your vault, encrypted, and never reaches the server. Neither does
         the device&rsquo;s secret: it goes from this page straight to the board over USB. The
         server is told an identifier and a public key, which is all it needs to tell a genuine
         upload from a forged one.
-      </p>
+      </PlateHead>
 
-      <form onSubmit={handleSubmit}>
+      <form className="stack stack-5" onSubmit={handleSubmit}>
         {stage !== 'done' ? (
-          <div style={{ marginTop: 'var(--sp-5)' }}>
-            <Field
-              label="Device name"
-              value={name}
-              onChange={setName}
-              disabled={Boolean(busy) || stage === 'board'}
-              placeholder="Greenhouse humidity"
-              maxLength={64}
-              autoFocus
-            />
-          </div>
+          <Field
+            label="Device name"
+            value={name}
+            onChange={setName}
+            disabled={Boolean(busy) || stage === 'board'}
+            placeholder="Greenhouse humidity"
+            maxLength={64}
+            autoFocus
+          />
         ) : null}
 
         {error ? (
-          <p className="alarm" style={{ marginTop: 'var(--sp-4)' }} role="alert">
+          <p className="alarm" role="alert">
             {error}
           </p>
         ) : null}
@@ -273,25 +268,7 @@ export function AddDevice({ username, onSignOut, signingOut }) {
         {stage === 'done' ? <DoneStage done={done} /> : null}
       </form>
 
-      <hr className="rule" style={{ margin: 'var(--sp-6) 0 18px' }} />
-      <div className="row spread">
-        <span className="small">
-          Signed in as <span className="mono">{username}</span>
-        </span>
-        <div className="row" style={{ gap: 'var(--sp-4)' }}>
-          <Link to="/" className="button button-link">
-            Devices
-          </Link>
-          <button
-            className="button button-link"
-            type="button"
-            onClick={onSignOut}
-            disabled={signingOut}
-          >
-            {signingOut ? 'Signing out' : 'Sign out'}
-          </button>
-        </div>
-      </div>
+      <SessionFooter username={username} onSignOut={onSignOut} signingOut={signingOut} />
     </Plate>
   );
 }
@@ -307,24 +284,22 @@ export function AddDevice({ username, onSignOut, signingOut }) {
  */
 function NamingStage({ named, busy, serialSupported, onSkip }) {
   return (
-    <>
+    <div className="stack stack-4">
       {!serialSupported ? (
-        <p className="board-note" style={{ marginTop: 'var(--sp-4)' }}>
+        <p className="board-note">
           This browser cannot talk to a board. Writing credentials over USB needs Web Serial,
           which today means a Chromium browser: Chrome, Edge or Opera on desktop. You can still
-          add the device here and provision it from a Chromium browser later, or with the
-          credentials themselves once revealing them is built.
+          add the device here and provision it from a Chromium browser later, or read its
+          credentials out from its own page and write them yourself.
         </p>
       ) : null}
 
-      <div style={{ marginTop: 'var(--sp-5)' }}>
-        <SubmitButton busy={Boolean(busy)} busyLabel={busy} disabled={!named}>
-          {serialSupported ? 'Connect board' : 'Add device'}
-        </SubmitButton>
-      </div>
+      <SubmitButton busy={Boolean(busy)} busyLabel={busy} disabled={!named}>
+        {serialSupported ? 'Connect board' : 'Add device'}
+      </SubmitButton>
 
       {serialSupported ? (
-        <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
+        <p className="small">
           Not an ESP32, or no board to hand?{' '}
           <button
             className="button button-link"
@@ -336,7 +311,7 @@ function NamingStage({ named, busy, serialSupported, onSkip }) {
           </button>
         </p>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -359,10 +334,10 @@ function NamingStage({ named, busy, serialSupported, onSkip }) {
 function BoardStage({ board, busy, overriding, onOverride, onDisconnect }) {
   if (board.state === OCCUPIED) {
     return (
-      <>
-        <div className="alarm" style={{ marginTop: 'var(--sp-4)' }} role="alert">
+      <div className="stack stack-4">
+        <div className="alarm" role="alert">
           <strong>This board already belongs to another device.</strong>
-          <p style={{ margin: 'var(--sp-2) 0 0' }}>
+          <p>
             It is holding{' '}
             {board.storedName ? (
               <>
@@ -394,12 +369,10 @@ function BoardStage({ board, busy, overriding, onOverride, onDisconnect }) {
                 negotiable and rust is the mark, not a danger colour. What makes
                 this read as the heavier choice is the label and the fact that
                 a deliberate action was needed to make it appear at all. */}
-            <div style={{ marginTop: 'var(--sp-5)' }}>
-              <SubmitButton busy={Boolean(busy)} busyLabel={busy}>
-                Overwrite the board
-              </SubmitButton>
-            </div>
-            <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
+            <SubmitButton busy={Boolean(busy)} busyLabel={busy}>
+              Overwrite the board
+            </SubmitButton>
+            <p className="small">
               Leave it as it is?{' '}
               <button
                 className="button button-link"
@@ -412,11 +385,11 @@ function BoardStage({ board, busy, overriding, onOverride, onDisconnect }) {
             </p>
           </>
         ) : (
-          <>
-            {/* The ordinary way out first, the hatch last. Someone scanning for
-                the way forward should reach "Disconnect" before they reach the
-                thing that destroys a device. */}
-            <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
+          /* The ordinary way out first, the hatch last. Someone scanning for the
+             way forward should reach "Disconnect" before they reach the thing
+             that destroys a device. */
+          <div className="stack stack-3">
+            <p className="small">
               Finished with this board?{' '}
               <button
                 className="button button-link"
@@ -427,7 +400,7 @@ function BoardStage({ board, busy, overriding, onOverride, onDisconnect }) {
                 Disconnect
               </button>
             </p>
-            <p className="small" style={{ margin: 'var(--sp-3) 0 0' }}>
+            <p className="small">
               Retiring that device?{' '}
               <button
                 className="button button-link"
@@ -438,27 +411,25 @@ function BoardStage({ board, busy, overriding, onOverride, onDisconnect }) {
                 Overwrite it anyway
               </button>
             </p>
-          </>
+          </div>
         )}
-      </>
+      </div>
     );
   }
 
   return (
-    <>
-      <p className="board-note" style={{ marginTop: 'var(--sp-4)' }}>
+    <div className="stack stack-4">
+      <p className="board-note">
         {board.state === BLANK
           ? 'This board has no credentials on it. Ready to provision.'
           : 'This board already holds this device. Writing again will refresh its credentials.'}
       </p>
 
-      <div style={{ marginTop: 'var(--sp-5)' }}>
-        <SubmitButton busy={Boolean(busy)} busyLabel={busy}>
-          Write to board
-        </SubmitButton>
-      </div>
+      <SubmitButton busy={Boolean(busy)} busyLabel={busy}>
+        Write to board
+      </SubmitButton>
 
-      <p className="small" style={{ margin: 'var(--sp-4) 0 0' }}>
+      <p className="small">
         Wrong board?{' '}
         <button
           className="button button-link"
@@ -469,14 +440,14 @@ function BoardStage({ board, busy, overriding, onOverride, onDisconnect }) {
           Disconnect
         </button>
       </p>
-    </>
+    </div>
   );
 }
 
 /** Says which of the two endings happened, because they are not the same state. */
 function DoneStage({ done }) {
   return done.wroteToBoard ? (
-    <div className="success" style={{ marginTop: 'var(--sp-5)' }} role="status">
+    <div className="success" role="status">
       <strong>{done.name}</strong> is in your vault, registered, and written to the board. It
       will start reporting once it is running firmware that uses those credentials.
       {/* An override destroyed something. Naming it here is the point: the
@@ -498,11 +469,11 @@ function DoneStage({ done }) {
       ) : null}
     </div>
   ) : (
-    <div className="board-note" style={{ marginTop: 'var(--sp-5)' }} role="status">
+    <div className="board-note" role="status">
       <strong>{done.name}</strong> is in your vault and registered. Its credentials have not
       reached any hardware yet, so it will show in Devices as never having reported. Provision an
-      ESP32 from this page when you have one to hand, or, for other hardware, read the
-      credentials out once revealing them is built.
+      ESP32 from this page when you have one to hand, or, for other hardware, reveal its
+      credentials from its own page and write them yourself.
     </div>
   );
 }
