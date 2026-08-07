@@ -340,21 +340,62 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > credentials is identical, and the server cannot tell a conforming third-party client from the
 > reference library — which is the point.
 
-- [ ] "Reveal credentials" control on an existing device, never a step in setup
-- [ ] Decrypt from the vault in the browser and show `DEVICE_ID` + `DEVICE_SECRET` as base64url, with a copy button
-- [ ] Reveal on demand, do not stay revealed; never persist the plaintext outside the vault — not localStorage, not a downloaded file
-- [ ] State the costs at the moment of revealing, not in docs: it is now in the clipboard and wherever it goes next, there is no overwrite protection (design 5.4), and storage on the target hardware is the porter's problem including surviving a firmware update
-- [ ] Link to the protocol documentation (4.7) from here — a revealed secret with no spec beside it is the wrong half of the answer
+- [x] "Reveal credentials" control on an existing device, never a step in setup: a section on
+      `DeviceDetail` (`app/src/components/RevealCredentials.jsx`), between rename and delete.
+      Withheld from an orphan, since there is no vault entry and therefore no secret to show
+- [x] Decrypt from the vault in the browser and show `DEVICE_ID` + `DEVICE_SECRET` as base64url, with a copy button: the vault is already open on this screen, so "decrypt" here is reading the entry `use-vault-devices` loaded; there is no second decryption and adding one would be the nested-layer mistake 4.3 already rejected. The values sit in the input field's own ground and rule (`.credential-value`), `user-select: all`, with the copy control in the one link appearance the rest of the app uses
+- [x] Reveal on demand, do not stay revealed; never persist the plaintext outside the vault: not localStorage, not a downloaded file. Component state only, so leaving the page hides it, and a `visibilitychange` listener hides it when the tab goes to the background. **Deliberately not a countdown**: a timer that yanks the value away mid-transcription is a UI people work around by screenshotting it, which is a strictly worse resting place than the screen it was on
+- [x] State the costs at the moment of revealing, not in docs: it is now in the clipboard and wherever it goes next, there is no overwrite protection (design 5.4), and storage on the target hardware is the porter's problem including surviving a firmware update: an `.alarm` panel above the values, not below them, since a warning under the thing it warns about is a warning read after the decision it was for. Same panel shape as the delete confirmation and the occupied-board override, because all three are one species: a cost stated at the moment of a deliberate act
+- [x] Link to the protocol documentation (4.7) from here: a revealed secret with no spec beside it is the wrong half of the answer. It points to `docs/protocol.md` on GitHub, opened only on a click and `rel="noreferrer"`: nothing in this app may reach a third party on load, and a documentation link that did would be telling GitHub who is provisioning a device and when
+
+> Copy elsewhere had to move with it. `AddDevice` told a non-Chromium browser and a
+> board-less add that credentials could be read out "once revealing them is built", which
+> stopped being true; both now name the device's own page.
 
 ### 4.7 Protocol documentation for third-party clients
 > The other half of "one hardware target done properly". Section 7 of the design document is
 > already the byte-level contract; this is packaging it as something someone can build against
 > without reading the whole architecture.
 
-- [ ] Write `docs/protocol.md`: HKDF labels, AEAD parameters, nonce construction, AAD layout, CBOR payload shape, signature input, and the three server checks
-- [ ] Document the `POST /records` API surface: request shape, every rejection and what it means
-- [ ] State the non-negotiables for a port: persisted `boot_epoch`, exact HKDF labels, no invented equivalents
-- [ ] Publish known-answer test vectors — a port that cannot reproduce them is broken, and finding that out from a vector beats finding it out from a server rejection
+- [x] Write `docs/protocol.md`: HKDF labels, AEAD parameters, nonce construction, AAD layout, CBOR payload shape, signature input, and the three server checks
+- [x] Document the `POST /records` API surface: request shape, every rejection and what it means. A table of every status with what to do about it, and the distinction that matters to firmware: 400/401 are "never retry unchanged", 409 is "advance `seq` and rebuild", 404 is "stop, this device has been deleted", and only 5xx is genuinely transient
+- [x] State the non-negotiables for a port: persisted `boot_epoch`, exact HKDF labels, no invented equivalents. Plus committing `boot_epoch` to storage *before* the first record of that boot rather than after, and doing the `seq` arithmetic in a real 64-bit integer
+- [x] Publish known-answer test vectors, since a port that cannot reproduce them is broken and finding that out from a vector beats finding it out from a server rejection. `docs/vectors/records-v1.json`, plus the same values inline in the document and a step-by-step "check a port against them in this order, the first mismatch is the bug"
+
+> **Three things this item did not anticipate, all of which it needed.**
+>
+> **The payload shape had to be decided, not just documented.** Design 7.3 says `CBOR {t, r}`
+> and stops there. v1 is now: `t` is unsigned seconds since the Unix epoch with `0` meaning
+> "this device has no clock" (rendered as that, never as 1970), and `r` is a map of text keys
+> to scalars. The CBOR profile is deliberately small: no byte strings, no tags, no
+> indefinite lengths, no duplicate or non-text keys: because the decoder runs on a blob a
+> device wrote and a device is a program somebody else wrote. That is `lib/crypto/cbor.js`,
+> hand-rolled for the same reason `provisioning-protocol.js` is: a general CBOR library
+> accepts all of it and hands the result to a dashboard.
+>
+> **The vectors had to be generated by the shipped code, or they are fiction.** A vector file
+> written beside the implementation agrees with the implementation's bugs. So
+> `scripts/generate-vectors.js` imports `lib/crypto/` through the same path the browser uses,
+> and `test/protocol-vectors.test.js` re-derives every field on every `npm test`. The
+> document cannot drift from the file, and the file cannot drift from the code.
+>
+> **Writing the record format down meant building the client half of it.** `lib/crypto/record.js`
+> (nonce, AAD, signing input, encrypt, decrypt) is what 6.3 needs anyway, and there was no
+> way to publish vectors for a format nothing on this side could produce. `decryptRecord`
+> re-checks the nonce against the `seq` before decrypting: the server runs that check too,
+> and the server is the party this is defending against.
+>
+> Verified against a running server with a throwaway probe (since deleted), 17 checks: both
+> published bodies posted verbatim and accepted (201), the first replayed and refused (409),
+> a signature with one bit flipped refused (401), a `seq`/nonce mismatch refused, both blobs
+> read back byte-identical and decrypted to the published payloads, `last_seq` returned as
+> the full uint64 string, and the device deleted afterwards so the probe re-runs clean. The
+> suite is 127 `node --test` cases, up from 109.
+>
+> One correction the writing turned up: `GET /devices/:id/records` does not return `sig`, and
+> the document now says so and why. The signature authenticates a record to the *server*,
+> which cannot decrypt it; a reader holding `device_data_key` already has the record's own
+> GCM tag over an AAD binding the `DEVICE_ID` and the `seq`, which is strictly stronger.
 
 ### 4.8 Device list — names and liveness
 - [x] Route `GET /devices` (authenticated): the metadata the server legitimately holds per device — `device_id`, `last_seq`, and when its newest record arrived. No names, because it has none — `src/routes/devices.ts`, scoped to `owner_user_id = req.session.userId`
@@ -445,29 +486,78 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
       `AddDevice` uses and for the same reason (a write on a stale version is a 409). The field
       shows the stored name back after saving, not what was typed, because the crypto layer
       normalises it
-- [ ] The delete confirmation names what it destroys, in the moment: the device's name, that
+- [x] The delete confirmation names what it destroys, in the moment: the device's name, that
       every record it uploaded is being erased from the only place it exists, and that this
       cannot be undone by anything the person still holds. Shaped like the occupied-board
       override (a second deliberate action, not armed by default, not staying armed), because
-      it is the same species of thing
-- [ ] Say that the board keeps running. A dashboard delete does not touch NVS: the firmware
+      it is the same species of thing. `DeleteSection` in `app/src/screens/DeviceDetail.jsx`:
+      The unarmed state offers no destructive control at all, only a link that says what it
+      arms; the armed state is an `.alarm` panel naming the device and stating that the
+      ciphertext on the server and the key that opens it are being erased together, with the
+      ordinary way out (&ldquo;Keep it&rdquo;) below the button. **What &ldquo;does not stay
+      armed&rdquo; means here**, since there is no cable to unplug: it disarms whenever the
+      device's own state changes underneath it. A reload that discovers the server row is
+      already gone turns a paired delete into an unregistered one, and the act that was
+      confirmed is no longer the act that would happen
+- [x] Say that the board keeps running. A dashboard delete does not touch NVS: the firmware
       still holds `DEVICE_SECRET` and will keep uploading into 404s until someone reprovisions
       or erases it. A confirmation that implies the hardware was dealt with is lying about
-      where the boundary is
+      where the boundary is. Said in the confirmation *and* again in the completed state,
+      because that is the screen someone is looking at when they decide they are finished
 - [ ] Offer the export (6.4) from the confirmation. It is the only way the readings survive
       the delete, and the moment someone is about to destroy them is the only moment offering
       it is useful. Ordering note: if 4.9 lands before 6.4, the confirmation ships without the
       offer rather than with a dead link
-- [ ] Delete is the only action available on an **orphan**, and it is server-only: there is no
-      vault entry to remove, so the two-step order above collapses to one step
-- [ ] Delete on an **unregistered** device is the mirror image, a pure vault write with no
-      server call, since the server has no row to delete
-- [ ] Optional `SIOT ERASE <expected-id>` in the provisioning sketch, carrying the expected id
+
+> Taken literally: 4.9 landed before 6.4, so the confirmation ships without the offer. It says
+> the readings exist nowhere else, which is the true half; the item stays open because the
+> sentence that would let someone act on that is the one that is missing, and adding it is a
+> line of copy plus a call once 6.4 exists.
+
+- [x] Delete is the only action available on an **orphan**, and it is server-only: there is no
+      vault entry to remove, so the two-step order above collapses to one step. `Found`
+      already withheld rename from an orphan, and `DeleteSection` reads the state rather than
+      taking a flag, so the two collapsed cases cannot drift from the join that produced them
+- [x] Delete on an **unregistered** device is the mirror image, a pure vault write with no
+      server call, since the server has no row to delete. This is also the retry path for a
+      paired delete that got halfway: the server step already succeeded, so what is left *is*
+      the unregistered case, and the error message says exactly that rather than "it failed"
+- [x] Optional `SIOT ERASE <expected-id>` in the provisioning sketch, carrying the expected id
       as the same compare-and-swap `WRITE` does (4.5), so a board swapped between the read and
       the erase is refused. It adds no exposure `WRITE` does not already have, and it means a
       retired board stops being a live `DEVICE_SECRET` sitting in flash for a device that no
       longer exists. Optional because `WRITE` already reclaims a board for a new device; this
-      is for the board going in a drawer
+      is for the board going in a drawer: **and `-` is not accepted as the expectation.** A
+      wildcard erase is a command that wipes whichever board happens to be plugged in, which
+      is the exact shape the swap exists to refuse, and there is nothing to erase on a blank
+      board anyway. Inside the sketch the secret is removed before the id: interrupted between
+      the two, a board with an id and no secret reads as occupied and so is not silently
+      written over, while the other order leaves a board that reads blank while still holding
+      the old secret in flash. Verified by reading both keys back before answering `OK`, the
+      same way `WRITE` verifies itself
+
+> **It has a caller, because a command with none is dead code.** `eraseCommand` in
+> `provisioning-protocol.js`, `ProvisioningSession.erase` in `web-serial.js`, and
+> `components/EraseBoard.jsx` on the completed-delete state of `DeviceDetail`, which is the
+> screen that already says "provision it for another device, or erase it, to stop it
+> reporting" and until now gave nobody a way to act on the sentence. Offered there and
+> nowhere else: a board carrying a device that still exists is reclaimed by provisioning over
+> it, which `AddDevice` already does with the vault available to name what is being replaced.
+> The three cases are `classifyBoard`'s, reused rather than rewritten: the board that was that
+> device's is erased, a blank one says there is nothing to do, and a board belonging to a
+> different device is refused with no override, since the way to erase that one is from its
+> own page after deleting it there.
+>
+> Verified on real hardware over COM6 after a recompile and upload, 19 checks: the handshake;
+> an erase against a blank board refused as `STALE` rather than quietly succeeding; write and
+> read back; an erase carrying the wrong expectation refused *and storage confirmed unchanged
+> afterwards*; missing, wildcard, short, non-canonical and extra arguments all refused, with
+> the board still holding its id after every one of them; the matching erase accepted; the
+> board reading blank; a second erase of the same id refused as `STALE`; and an erased board
+> taking a blank-expectation write again, which is what makes it genuinely reusable rather
+> than merely empty. Then separately: write, erase, close the port, reopen it (which
+> hard-resets the board over DTR/RTS), and `READ-ID` still returns `-`, so the erase is in
+> flash rather than in RAM. Two more `node --test` cases for the codec; the suite is 129.
 - [ ] Forward note for 5.6: a 404 from `POST /records` means this device has been deleted and
       no amount of retrying will change that, so it must not be handled as the same class of
       failure as a network drop. A deleted device that retries forever is a board flattening
@@ -478,6 +568,16 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
       write after the server delete and confirm the device lands in `UNREGISTERED` rather than
       anywhere new; confirm a second account gets 404 deleting the first account's device
 
+> **The client half is built and not yet walked.** `deleteDevice` in `app/src/lib/api.js` folds
+> a 404 into success, for the reason the item two above gives: the endpoint answers 404 for
+> "not yours" and "does not exist" alike, and the goal state is *absence*, which a delete that
+> already landed is in. The vault step is idempotent the same way, skipping the write when the
+> entry is already gone rather than throwing `no such device in the vault` at a retry that has
+> nothing left to do. Deleting is a terminal state on the device page rather than a redirect to
+> the list: the device really is gone, so re-reading would render "No such device", which is
+> true and says nothing about what just happened, and a row quietly vanishing from a list is
+> not a confirmation.
+>
 > **The server half of that test is done; the halves that need a client are not.** A throwaway
 > Node probe (since deleted, same as 4.5's PowerShell one) drove two accounts, two devices,
 > five records and two grants — one naming the device as source and one as recipient, so both
@@ -489,10 +589,11 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > comes back at `last_seq` 0, and accepts a record at the `seq` the deleted rows had used, which
 > is the property that makes the id genuinely reusable rather than merely re-insertable.
 >
-> Still untested, because all three need 4.9's client half: the vault entry going, the orphan
-> and unregistered single-step paths, and killing the vault write after the server delete to
-> confirm the device lands in `UNREGISTERED`. No automated test either way; `backend/` still has
-> no harness, same gap as everything since 2.3.
+> Still untested: the vault entry going, the orphan and unregistered single-step paths, and
+> killing the vault write after the server delete to confirm the device lands in
+> `UNREGISTERED`. Those need the client half, which now exists, so they are a hand test rather
+> than a gap in the code. No automated test either way; `backend/` still has no harness, same
+> gap as everything since 2.3.
 
 > **What the per-device surface pulled out of `Devices.jsx` on the way.** Three things that
 > were written for one screen and are now needed by two, and in each case the second copy is
@@ -529,48 +630,77 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > **Not verified in a browser.** The suite passes and the client builds, but the screens
 > themselves are uncovered as always, and the Chrome session available to this pass dropped
 > before the flow could be walked. Hand test: sign in, unlock, open a device, rename it,
-> reload.
+> reload. Then delete: a paired device (both steps, and confirm the row is gone from Postgres
+> and the vault entry with it), an unregistered one (vault only), and an orphan (server only,
+> made by deleting the vault entry out from under a registered device).
 
 ---
 
 ## Phase 5 — ESP32 Library & Wire Protocol
 
+> **Nothing outside the ESP32 Arduino core is compiled in.** mbedTLS (HKDF, AES-256-GCM on
+> the hardware accelerator), libsodium (Ed25519) and TinyCBOR are all already on the core's
+> default include and link lines, so 5.1's "need a small C++ implementation or existing lib"
+> and 5.4's "or a small Ed25519 lib" resolved to neither: no vendored crypto, no dependency to
+> pin, no second implementation to get wrong. Same reasoning as `backend/src/lib/ed25519.ts`
+> using Node's own. (mbedTLS has no Ed25519 in any version, which is what libsodium is for.)
+
 ### 5.1 Library skeleton
-- [ ] New Arduino/PlatformIO library project (`SIoT` lib) separate from example sketches
-- [ ] NVS read helpers for `DEVICE_ID` / `DEVICE_SECRET` from the dedicated partition
-- [ ] `SIoT.begin()` takes no credentials — on the supported path the device already has them (design 6)
-- [ ] Key derivation on-device: HKDF-SHA256 (need a small C++ implementation or existing lib — mbedTLS has primitives)
-- [ ] Derive `device_data_key` and `ed25519_seed` on boot
+- [x] New Arduino/PlatformIO library project (`SIoT` lib) separate from example sketches: `firmware/SIoT/`, an Arduino library with `library.properties`, compiled with `arduino-cli --libraries firmware`
+- [x] NVS read helpers for `DEVICE_ID` / `DEVICE_SECRET` from the dedicated partition: the same partition, namespace and keys the provisioning sketch writes, opened read-write even to read (a read-only open of a never-written namespace fails, and an unprovisioned board is a state to report rather than crash on)
+- [x] `SIoT.begin()` takes no credentials: on the supported path the device already has them (design 6): and there is no overload that accepts any, deliberately
+- [x] Key derivation on-device: HKDF-SHA256 (need a small C++ implementation or existing lib: mbedTLS has primitives): `mbedtls_hkdf` with an empty salt; `CONFIG_MBEDTLS_HKDF_C` is on in the core's build
+- [x] Derive `device_data_key` and `ed25519_seed` on boot: and zero `DEVICE_SECRET` immediately afterwards. Both keys are reproducible from it and it is never needed again, so it does not sit in RAM for the life of the sketch waiting to turn up in a core dump
 
 ### 5.2 Sequence counters
-- [ ] Persist `boot_epoch` to non-volatile storage (NVS on ESP32), increment once on boot before any record. This one is not optional on any port, unlike credential storage — a device that forgets it repeats a `seq`, and that is nonce reuse
-- [ ] Track `msg_counter` in RAM, reset to 0 each boot, increment per record
-- [ ] Compose `seq = (boot_epoch << 32) | msg_counter`
-- [ ] Test: power-cycle device repeatedly, confirm `boot_epoch` strictly increases and never repeats
+- [x] Persist `boot_epoch` to non-volatile storage (NVS on ESP32), increment once on boot before any record. This one is not optional on any port, unlike credential storage: a device that forgets it repeats a `seq`, and that is nonce reuse: **in the `siot` partition, not the application's own `nvs`**, which is the decision the item does not make and the one that matters most here: a `Preferences.clear()` or an `nvs_flash_erase()` in an ordinary factory-reset routine reaches the app partition, and losing this counter there would make nonce reuse routine rather than unlikely. Written and then *read back* before `begin()` returns, and if it cannot be committed the library refuses to produce records at all: no telemetry is a great deal better than nonce reuse. `SIOT ERASE` deliberately leaves it behind, since a counter is not a secret and a re-provisioned board should keep a sequence that only moves forward
+- [x] Track `msg_counter` in RAM, reset to 0 each boot, increment per record: per *record*, not per upload attempt, which is what makes a retry safe: the same bytes at the same `seq` are the same record, while a rebuilt record at that `seq` would reuse the nonce
+- [x] Compose `seq = (boot_epoch << 32) | msg_counter`
+- [x] Test: power-cycle device repeatedly, confirm `boot_epoch` strictly increases and never repeats: observed across four resets on real hardware, including the one the upload performs and the ones a port open triggers over DTR/RTS: `boot_epoch` read 1, 2, 3, 4 with `msg_counter` back at 0 each time. `UINT32_MAX` is a hard stop rather than a wrap
 
 ### 5.3 Nonce & AEAD
-- [ ] Build nonce as `0x00000000 || seq` (12 bytes)
-- [ ] Implement AES-256-GCM encrypt using ESP32 hardware acceleration (mbedTLS)
-- [ ] Build AAD: `version(1B) || DEVICE_ID(16B) || record_type(1B) || seq(8B)`
-- [ ] Unit test (on-device or host-side mock): encrypt/decrypt round-trip with known test vectors
+- [x] Build nonce as `0x00000000 || seq` (12 bytes)
+- [x] Implement AES-256-GCM encrypt using ESP32 hardware acceleration (mbedTLS): `mbedtls_gcm_crypt_and_tag`, with the tag appended to the ciphertext, which is what the wire format means by `ciphertext`
+- [x] Build AAD: `version(1B) || DEVICE_ID(16B) || record_type(1B) || seq(8B)`: both constants fixed, per the 6.1 note and `docs/protocol.md` section 5
+- [x] Unit test (on-device or host-side mock): encrypt/decrypt round-trip with known test vectors. Done against the real thing rather than a mock: records built on the board were decrypted by `frontend/lib/crypto/record.js` under a key derived from the same `DEVICE_SECRET`. TinyCBOR encoded them and the hand-rolled JS decoder read them, so it is a cross-implementation check rather than a round trip through one codec
 
 ### 5.4 Signing
-- [ ] Implement Ed25519 signing (mbedTLS or a small Ed25519 lib) over `AAD || nonce || ciphertext`
-- [ ] Unit test: signature verifies with the derived public key
+- [x] Implement Ed25519 signing (mbedTLS or a small Ed25519 lib) over `AAD || nonce || ciphertext`: libsodium's `crypto_sign_ed25519_seed_keypair` and `crypto_sign_ed25519_detached`
+- [x] Unit test: signature verifies with the derived public key. Verified by the server, against a `sign_pub` **the browser derived and registered**, which is the property that actually matters: the two implementations agree about the HKDF label, the seed expansion and the signing input, or the upload is a 401
 
 ### 5.5 CBOR payload
-- [ ] Pick a CBOR library for the readings payload (`t`, `r` fields)
-- [ ] Define how the device owner's sketch supplies readings (simple API: `siot.addReading(name, value)`)
+- [x] Pick a CBOR library for the readings payload (`t`, `r` fields): TinyCBOR, already in the core
+- [x] Define how the device owner's sketch supplies readings (simple API: `siot.addReading(name, value)`): overloaded for double, int, long long, bool and text, into a fixed-size buffer with no heap. `t` comes from `time()` and is sent as 0 when the clock has never been set, which a client renders as "this device has no clock" rather than as 1970: `seq` is the authoritative order, so a device with no route to NTP is fully functional
 
 ### 5.6 Upload
-- [ ] HTTPS POST client on ESP32 (WiFiClientSecure) with SPKI pin configured
-- [ ] Implement `POST /records` body: `{ device_id, seq, nonce, ciphertext, sig }`
-- [ ] Handle upload failure/retry (network drop, don't lose readings silently — decide buffering strategy, keep it simple for v1)
+- [x] HTTPS POST client on ESP32 (WiFiClientSecure) with SPKI pin configured: **deviation: the certificate is pinned, not its SPKI.** `WiFiClientSecure` exposes no hook for a public-key hash and there is no supported way to reach into the handshake for one from Arduino. Pinning the certificate is strictly narrower, so it errs towards refusing rather than accepting; rotation for pinned devices is design 15.1's open problem either way. The pin is required, not optional: a sensor has no user to notice a warning page, so an unpinned device hands its records to whatever answers on that address
+- [x] Implement `POST /records` body: `{ device_id, seq, nonce, ciphertext, sig }`: `seq` as a decimal string, never a JSON number
+- [x] Handle upload failure/retry (network drop, don't lose readings silently: decide buffering strategy, keep it simple for v1): **decided: no buffer.** Retries re-send the same bytes with backoff, and only `NetworkFailure` and `ServerFailure` are retried, since a 400 or a 401 is a record that will be refused identically forever. A record that cannot be delivered is dropped and leaves a gap in `seq`, which 6.3 surfaces as possible missing data rather than smoothing over. The 404 is latched (`isDeleted()`), which closes 4.9's forward note: further sends fail immediately without touching the radio, rather than flattening a battery against a server that will never accept them
 - [ ] End-to-end test against local dev server: one real reading, uploaded, verified
 
+> **Everything but the last hop is verified on hardware; the last hop needs a WiFi network
+> this session did not have.** A throwaway sketch drove the real library on the real board
+> with no radio: read the credentials out of the `siot` partition, derived both keys, advanced
+> and persisted `boot_epoch`, and built two records through `buildRecord`, which were then
+> posted to the running server from the PC. 21 checks, all passing: both accepted (201), which
+> is the server running design 7.4's three checks against bytes this machine did not build;
+> the first replayed and refused (409); a signature with one character changed refused; `seq`
+> advancing by exactly one with `msg_counter` starting at 0; the nonce equal to
+> `0x00000000 || seq` for both; both blobs read back and **decrypted with the browser's own
+> `device_data_key`** into the readings the sketch added; and `last_seq`/`last_seen_at`
+> updated. What that leaves untested is `WiFiClientSecure` and the pinned certificate, which
+> is one function (`post`) and needs a network to point at.
+
 ### 5.7 Example sketch
-- [ ] Minimal example: `SIoT.begin()` reading NVS creds, define one reading (e.g. temperature), loop + upload every N seconds
-- [ ] Document in README how a user writes their own sketch against the library
+- [x] Minimal example: `SIoT.begin()` reading NVS creds, define one reading (e.g. temperature), loop + upload every N seconds: `examples/Temperature`: the internal temperature plus RSSI and free heap, every thirty seconds. It stops for good on `isDeleted()` rather than looping into refusals
+- [x] Document in README how a user writes their own sketch against the library: `firmware/SIoT/README.md`, including the two things that would otherwise waste an afternoon: the sketch needs `partitions.csv` beside it (without it the credentials sit at an address the image's table does not describe, and a perfectly provisioned board reports `NotProvisioned`), and provisioning comes before flashing the application, not after
+
+> **`buildRecord()` is not in the roadmap and earns its place.** It hands back the
+> `POST /records` body without sending it, which is the seam design 6.1 asks for: WiFi is one
+> transport, and a device on LoRa or a cellular modem still wants the record built by code
+> that has been checked. It is also what made the hardware test above possible without a
+> network, and what it returns holds only ciphertext, a signature and public identifiers, so
+> it is safe to log or forward.
 
 ---
 
@@ -690,7 +820,7 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 ### 7.3 Widget rendering
 - [ ] Build `Graph` widget (time series from decrypted records)
 - [ ] Build `Gauge` widget
-- [ ] Build `Toggle` widget (for actions — decide how write-back to device works, likely out of scope for v1 read path)
+- [ ] Build `Toggle` widget (for actions: write-back to a device is Phase 11's `device_command_key` channel, not this phase; the widget renders state here and defers sending to 11.5)
 - [ ] Auto-render dashboard from schema + decrypted records, no per-device hardcoding
 
 ### 7.4 Layout
@@ -865,6 +995,145 @@ surprise discovered by someone building it.
 ### 10.5 Sending from the dashboard (not v1)
 
 - [ ] Decide whether a notification can originate anywhere other than a device. If yes it needs the asymmetric scheme from 10.0's third decision, and that is a phase of its own rather than an item here
+
+---
+
+## Phase 11 — Device Commands (Dashboard → Device)
+
+> **The number is not the order.** Depends on Phase 4 (device identity — the vault already
+> holds `DEVICE_SECRET` for every owned device) and, for anything beyond a bare protocol, on
+> Phase 7's schema-driven dashboard (7.3's `Toggle` widget stub is the UI half of this). Nothing
+> in Phases 8, 9 or 10 blocks it.
+
+Every channel so far only lets a device speak and the dashboard listen. This is the other
+direction: a device owner presses a control and the device picks it up and acts on it. The
+server still never sees a plaintext instruction, and it still cannot forge or replay one
+undetected.
+
+### 11.0 The decisions this rests on
+
+Read these before ticking anything below, the same way 10.0 has to be read first for
+notifications. This is not that phase run backwards; the direction reversal changes every
+answer.
+
+**Commands need their own endpoints; they cannot ride on `POST /records`.** Notifications reuse
+that route because the device stays the writer in both directions — the only thing that changed
+was what the ciphertext meant. Here the *browser* is the writer, so there is nothing to
+disguise a new use for. This is closer in shape to grants (design 9): a write path the owner's
+session calls, and a read path the device polls.
+
+**The key is a new label, not new machinery.** 10.0's third decision needed an asymmetric
+scheme because a notification's writer might not be the device and so might not hold
+`DEVICE_SECRET`. A command's writer is always the device's owner, and the owner's browser
+already holds `DEVICE_SECRET` for every device in its own vault — it minted the secret in the
+first place (4.1). So `device_command_key`, a fourth HKDF label off `DEVICE_SECRET`
+(`"siot/device/command/v1"`, alongside data/sign/notify), is symmetric, and both sides can
+already derive it from something they both legitimately hold. No public-key scheme, no new
+device identity, no vault change beyond one more counter (below).
+
+**Nonces are random here, and that is a deliberate reversal of 7.2's rule, not an oversight.**
+7.2 rules out random nonces because the ESP32 is the encrypting party at boot with no
+trustworthy RNG state, uploading forever. Here the *browser* encrypts, `crypto.getRandomValues`
+is exactly the CSPRNG a device can't be trusted to have, and command volume is a person pressing
+a button, not a sensor looping. Same reasoning Section 1.3 already used for wrapping
+`vault_key`: a key used rarely gets a random IV, a key used forever gets a counter. A
+counter-based nonce on the write side would need a monotonic value surviving across tabs,
+machines and sign-ins — a second `vault_version`-shaped problem, for no safety this key's
+actual usage pattern needs solving.
+
+**Replay defense lives inside the ciphertext, not the nonce or the AAD, because the failure mode
+is physical, not stale data.** A replayed vault write is stale *data* and 3.2's rollback warning
+is a proportionate answer to that. A replayed command is a physical action repeating — "unlock"
+firing twice is worse than anything a warning banner fixes after the fact. So every command
+plaintext carries its own `command_seq`, sourced from a per-device counter kept **in the
+vault**, next to `secret` and `name`, bumped by an ordinary vault write under the existing
+`vault_version` compare-and-swap — two tabs racing to send a command get the same 409 recovery
+path every other concurrent vault write already has. The device persists the highest
+`command_seq` it has executed, the same way it persists `boot_epoch`, and refuses anything at or
+below that mark. The AAD stays small — `version || DEVICE_ID || a command-class byte` — because
+ordering doesn't drive the nonce the way it does for records, so it doesn't need to live where
+the server can see it.
+
+**A command's authenticity is the AEAD tag; its authorization is the session, not a device
+signature.** The server can't verify content (it can't decrypt), so the one thing worth
+checking at write time is exactly what `POST /grants` already checks: does this session own the
+target device. Trust in the content comes from the tag — forging a valid command without
+`device_command_key` is exactly as hard as forging a vault entry without `vault_key`.
+
+**Delivery is at-least-once, and firmware has to be designed for that, not around it.** A lost
+ack means the same command is fetched again. The `command_seq` mark stops it being *executed*
+twice only if the mark advances before the side effect fires, which is a firmware ordering
+choice, not something the protocol can guarantee. The schema (7.1) should steer device authors
+toward commands that are idempotent by construction: "set target state to X" survives a
+duplicate for free, "toggle" or "increment" does not. A widget that only offers the first kind
+is cheaper than asking every sketch author to get this right unassisted.
+
+**Scope is owned devices only, and that is not a placeholder.** A command needs
+`device_command_key`, derivable only from `DEVICE_SECRET`, which a grant (design 9) never
+shares — grants carry `device_data_key` and are read-only by design (9.1). Commanding a device
+you were only ever granted *read* access to would be a new grant type with a materially larger
+blast radius (a compromised co-tenant could now actuate, not just observe) and is a decision for
+its own phase, not an item folded in here.
+
+### 11.1 The command key
+
+- [ ] Derive `device_command_key` via HKDF from `DEVICE_SECRET`, info=`"siot/device/command/v1"`
+      — the fourth label in `HKDF_INFO`, added to `deriveDeviceKeys` in
+      `frontend/lib/crypto/device.js` and the ESP32 library's boot derivation in the same
+      commit, same discipline 10.1 already states for the notify key
+- [ ] Unit test: distinct from `device_data_key`, `ed25519_seed` and `device_notify_key` derived
+      from the same secret; reproducible from the secret alone
+
+### 11.2 Sending — dashboard side
+
+- [ ] Add a per-device `nextCommandSeq` counter to the vault document (`vault-document.js`),
+      next to `secret`/`name`; sending a command reads it, bumps it, and writes the vault before
+      posting the command, so a 409 from a concurrent vault write is recoverable the same way
+      every other vault mutation already is
+- [ ] Encrypt `{ command_seq, type, args }` under `device_command_key` with a random 96-bit
+      nonce, AAD `version(1B) || DEVICE_ID(16B) || command-class byte`
+- [ ] Route `POST /devices/:id/commands` (session-authenticated, owner-scoped like
+      `POST /grants`): store ciphertext, nonce, and a server-assigned monotonic per-device
+      cursor used only for delivery ordering and pruning (11.4) — never bound into the AAD,
+      since it is a convenience for the server's own bookkeeping, not a security property
+- [ ] Test: posting to a device you don't own is rejected the same way `POST /grants` rejects it
+
+### 11.3 Receiving — device side
+
+- [ ] `SIoT` library: poll `GET /devices/:id/commands` (public, unauthenticated by session, same
+      shape as `GET /devices/:id/grants` — the device holds no session either)
+- [ ] Decrypt each with `device_command_key`; discard anything that fails to open — a stranger
+      polling this endpoint can't produce a valid one, so a failure here means corruption, not
+      an attack worth alarming on
+- [ ] Compare the decrypted `command_seq` against a persisted high-water mark (new NVS value,
+      alongside `boot_epoch`, in the `siot` partition for the same reason that one is); skip
+      anything at or below it, and persist the new mark **before** running a side effect the
+      sketch's own action can't otherwise make safe to repeat
+- [ ] Test: a re-delivered ciphertext (ack never landed) is skipped the second time; a tampered
+      ciphertext (flipped bit) is discarded, not executed
+
+### 11.4 Acknowledgement and pruning
+
+- [ ] `POST /devices/:id/commands/ack`, device-authenticated by the same Ed25519 key
+      `POST /records` already verifies (`{ device_id, up_to: <cursor>, sig }`) — reusing check
+      1's machinery rather than inventing a second way for the server to trust a device
+- [ ] Server deletes commands at or below the acked cursor for that device, which is what the
+      cursor from 11.2 is for: it lets the server prune without ever knowing what it pruned
+- [ ] An ack is safe to replay (advancing an already-advanced mark is a no-op), so it needs no
+      compare-and-swap the way `last_seq` needs one on the write side
+- [ ] Test: an ack advances the cursor; a second identical ack changes nothing; a command posted
+      after the acked point survives the prune
+
+### 11.5 Command types come from the schema, not a free-form channel
+
+- [ ] A device's schema (7.1) declares which command types it accepts and their argument shape
+      — the same allowlist discipline 7.2 applies to rendering, now applied to what a dashboard
+      is even allowed to *send*
+- [ ] `Toggle` widget (7.3) is the first client of this: wire it to 11.2's send path instead of
+      leaving it read-only
+- [ ] Bound argument size and type the way 10.2 bounds a notification message — a device that
+      can be sent an arbitrarily large payload has a new resource-exhaustion surface it didn't
+      have when it was only ever a writer
 
 ---
 
