@@ -12,6 +12,7 @@
  */
 
 import {
+  eraseCommand,
   helloCommand,
   readIdCommand,
   writeCommand,
@@ -132,6 +133,17 @@ export class ProvisioningSession {
    */
   async write(expectedId, deviceId, deviceSecret) {
     const response = await this.#exchange(writeCommand(expectedId, deviceId, deviceSecret));
+    if (!response.ok) throw new Error(describeError(response));
+  }
+
+  /**
+   * Clears both credentials, for a board being retired rather than reused
+   * (roadmap 4.9).
+   *
+   * @param {string} expectedId what `readId` returned; the board re-checks it.
+   */
+  async erase(expectedId) {
+    const response = await this.#exchange(eraseCommand(expectedId));
     if (!response.ok) throw new Error(describeError(response));
   }
 

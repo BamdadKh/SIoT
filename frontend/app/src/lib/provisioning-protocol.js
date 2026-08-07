@@ -54,6 +54,27 @@ export function writeCommand(expectedId, deviceId, deviceSecret) {
   return `${PREFIX}WRITE ${expectedId ?? NO_ID} ${deviceId} ${deviceSecret}`;
 }
 
+/**
+ * Retires a board: both values removed, carrying the same compare-and-swap the
+ * write does (roadmap 4.9).
+ *
+ * `WRITE` already reclaims a board for a new device, so this is for the board
+ * going in a drawer rather than into another project: a retired board should not
+ * stay a live `DEVICE_SECRET` in flash for a device that no longer exists.
+ *
+ * The expected id is required, and `-` is not a value it accepts. An erase with
+ * no expectation is a command that wipes whichever board happens to be plugged
+ * in, which is the exact shape the swap exists to refuse.
+ *
+ * @param {string} expectedId base64url, what `readId` just returned.
+ */
+export function eraseCommand(expectedId) {
+  if (!expectedId || expectedId === NO_ID) {
+    throw new TypeError('an erase needs the DEVICE_ID the board is expected to be holding');
+  }
+  return `${PREFIX}ERASE ${expectedId}`;
+}
+
 /* --- responses ----------------------------------------------------------- */
 
 /**
@@ -173,8 +194,11 @@ export function describeError(response) {
   switch (response.code) {
     case 'STALE':
       // The board found something other than what this client expected, which
-      // after a successful read means the board changed underneath it.
-      return 'The board is not the one that was checked a moment ago. Nothing was written. Reconnect and try again.';
+      // after a successful read means the board changed underneath it. The
+      // wording covers the erase too: "nothing was changed" is true of both,
+      // and naming the specific command would need a second describe function
+      // whose only difference is one verb.
+      return 'The board is not the one that was checked a moment ago. Nothing on it was changed. Reconnect and try again.';
     case 'BAD-LENGTH':
     case 'BAD-ARGS':
     case 'BAD-COMMAND':
@@ -185,8 +209,8 @@ export function describeError(response) {
     case 'TOO-LONG':
       return 'The board rejected the command as too long. Its provisioning sketch is probably a different version from this page.';
     case 'NVS':
-      return 'The board could not save the credentials to its storage. Nothing was written.';
+      return 'The board could not change its storage. Nothing on it was changed.';
     default:
-      return 'The board refused the write for a reason this page does not recognise.';
+      return 'The board refused the command for a reason this page does not recognise.';
   }
 }

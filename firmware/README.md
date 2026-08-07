@@ -1,6 +1,18 @@
 # Firmware
 
-Two sketches, neither of which is the SIoT library. That is Phase 5 and does not exist yet.
+## `SIoT/`: the device library (Phase 5)
+
+The reference implementation of `docs/protocol.md`. A sketch calls `addReading` and `send`;
+the library reads its credentials from the `siot` NVS partition, derives both keys, keeps the
+sequence, encrypts, signs and uploads. See `SIoT/README.md`, and `SIoT/examples/Temperature`
+for a complete sketch.
+
+```bash
+arduino-cli compile --fqbn esp32:esp32:esp32 --libraries firmware firmware/SIoT/examples/Temperature
+```
+
+Depends on nothing outside the ESP32 core: mbedTLS for HKDF and AES-256-GCM, libsodium for
+Ed25519, TinyCBOR for the payload.
 
 ## `esp32-provisioning/` — the provisioning listener (roadmap 4.5)
 
@@ -29,13 +41,19 @@ There is no reason to reach for a serial monitor in the normal flow, but the pro
 plain text and answers one line per command, so a monitor at 115200 works:
 
 ```
-SIOT HELLO      -> SIOT OK PROVISION/1
-SIOT READ-ID    -> SIOT OK <device_id>   or   SIOT OK -
+SIOT HELLO              -> SIOT OK PROVISION/1
+SIOT READ-ID            -> SIOT OK <device_id>   or   SIOT OK -
+SIOT ERASE <device_id>  -> SIOT OK               or   SIOT ERR STALE <stored-id|->
 ```
 
 `READ-ID` is the only read there is. Nothing reads `DEVICE_SECRET` back out, deliberately:
 a board that would hand its secret to anyone who can reach the port is worse than one that
 makes you type the value again.
+
+`ERASE` takes the id it expects to find and refuses if that is not what is there, the same
+compare-and-swap `WRITE` uses. There is no "erase whatever is on it" form: that would be a
+command that wipes whichever board happens to be plugged in. It is for a board being retired
+rather than reused, since provisioning over one already destroys the old credentials.
 
 ## `esp32/` — the dead spike
 
