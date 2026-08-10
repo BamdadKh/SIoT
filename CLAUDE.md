@@ -672,6 +672,27 @@ ciphertext and never in the AAD (a distinguishable alert record is a labelled ev
 the accepted cost is that the server cannot trigger delivery); and a symmetric key that can
 write can also read, so "notification write key" cannot mean what it sounds like.
 
+**Phase 11 has a backend-only slice done: `POST`/`GET /devices/:id/commands` and the whole of
+11.4's ack/prune.** `src/routes/commands.ts`. The write side is session-authenticated and
+owner-scoped exactly like `POST /grants` (the server cannot verify `ciphertext`'s contents
+either way, so ownership is the only thing worth checking); the poll side is public, alongside
+`recordRoutes` and `deviceGrantRoutes`, since a device holds no session to poll with. The
+delivery cursor is `device_commands.id`, a bare bigserial (migration
+`1785670000000_device-commands.js`) rather than a second per-device counter: a bigserial is
+already globally monotonic, which is monotonic per device for free. `POST
+/devices/:id/commands/ack` reuses `POST /records`' Ed25519 verification (`src/lib/ed25519.ts`)
+rather than inventing a second way to trust a device, signing `device_id(16B) || up_to(8B BE)`
+and deleting every row at or below that cursor; replaying an ack prunes nothing and is not an
+error, so there is no compare-and-swap to get wrong the way `last_seq` has one. `records` and
+`grants` already cascade off `devices` on delete, and this table does too, checked by hand
+rather than assumed. 11.1 (the `device_command_key` HKDF label) and everything past it in 11.2
+and 11.3 are `frontend/lib/crypto/` and `firmware/SIoT/` work — deriving a key nothing on the
+server side ever touches, and decrypting on a device that doesn't have this key yet — left for a
+session that touches those. Verified by hand with a throwaway probe (deleted after use, same
+pattern as every backend-only phase before it): 20 checks covering cursor ordering, cross-owner
+rejection, wrong-signature rejection, ack idempotency, and partial pruning, plus a second probe
+confirming the cascade delete. No automated test; `backend/` still has no test harness.
+
 The frontend suite is 129 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
 `sequence.js`, `provisioning-protocol.js` and `cbor.js` are React-free so the suite reaches them
 directly, and `protocol-vectors.test.js` re-derives every published vector from scratch.

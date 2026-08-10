@@ -1092,13 +1092,24 @@ its own phase, not an item folded in here.
       every other vault mutation already is
 - [ ] Encrypt `{ command_seq, type, args }` under `device_command_key` with a random 96-bit
       nonce, AAD `version(1B) || DEVICE_ID(16B) || command-class byte`
-- [ ] Route `POST /devices/:id/commands` (session-authenticated, owner-scoped like
+- [x] Route `POST /devices/:id/commands` (session-authenticated, owner-scoped like
       `POST /grants`): store ciphertext, nonce, and a server-assigned monotonic per-device
       cursor used only for delivery ordering and pruning (11.4) — never bound into the AAD,
-      since it is a convenience for the server's own bookkeeping, not a security property
-- [ ] Test: posting to a device you don't own is rejected the same way `POST /grants` rejects it
+      since it is a convenience for the server's own bookkeeping, not a security property.
+      `src/routes/commands.ts`. **The cursor is `device_commands.id`, a bare bigserial, not a
+      second per-device counter**: a bigserial is already globally monotonic, which is
+      monotonic per device for free, so there is nothing to keep in sync with anything else
+- [x] Test: posting to a device you don't own is rejected the same way `POST /grants` rejects it
+      — verified by hand, see the note below
 
 ### 11.3 Receiving — device side
+
+> **The backend half of the first bullet is done; the device-side half is not.** `GET
+> /devices/:id/commands` (`src/routes/commands.ts`, registered public alongside `recordRoutes`
+> and `deviceGrantRoutes` since a device holds no session) exists and is verified below. What is
+> unticked is everything that needs `device_command_key` and NVS, none of which exists yet: that
+> is firmware work (`firmware/SIoT/`), out of scope for a backend-only pass the same way 11.1's
+> key derivation is.
 
 - [ ] `SIoT` library: poll `GET /devices/:id/commands` (public, unauthenticated by session, same
       shape as `GET /devices/:id/grants` — the device holds no session either)
@@ -1114,15 +1125,36 @@ its own phase, not an item folded in here.
 
 ### 11.4 Acknowledgement and pruning
 
-- [ ] `POST /devices/:id/commands/ack`, device-authenticated by the same Ed25519 key
+- [x] `POST /devices/:id/commands/ack`, device-authenticated by the same Ed25519 key
       `POST /records` already verifies (`{ device_id, up_to: <cursor>, sig }`) — reusing check
-      1's machinery rather than inventing a second way for the server to trust a device
-- [ ] Server deletes commands at or below the acked cursor for that device, which is what the
+      1's machinery rather than inventing a second way for the server to trust a device.
+      Signing input is `device_id(16B) || up_to(8B BE)`, the same shape `buildAad`/`seqToBytes`
+      already use for records, just without an AAD wrapper — there is nothing here that needs
+      to look like `AAD || nonce || ciphertext`, since an ack has no ciphertext of its own
+- [x] Server deletes commands at or below the acked cursor for that device, which is what the
       cursor from 11.2 is for: it lets the server prune without ever knowing what it pruned
-- [ ] An ack is safe to replay (advancing an already-advanced mark is a no-op), so it needs no
+- [x] An ack is safe to replay (advancing an already-advanced mark is a no-op), so it needs no
       compare-and-swap the way `last_seq` needs one on the write side
-- [ ] Test: an ack advances the cursor; a second identical ack changes nothing; a command posted
+- [x] Test: an ack advances the cursor; a second identical ack changes nothing; a command posted
       after the acked point survives the prune
+
+> Verified by hand with a throwaway probe (since deleted, same pattern as every other backend
+> phase — `backend/` still has no test harness): 20 checks against a running server, standing in
+> for the Phase 4.1 browser device derivation and the un-built dashboard/firmware halves of this
+> phase. Two accounts, one device: queuing two commands returns strictly increasing cursors;
+> polling returns both, oldest first, with ciphertext and nonce round-tripping byte-identical;
+> the second account gets 404 queuing for the first account's device (matching every other
+> cross-owner check in this codebase) and an unauthenticated queue gets 401; polling an unknown
+> `device_id` returns an empty list rather than an error, so the poll route leaks no more than
+> `GET /devices/:id/grants` already does; an ack signed by the wrong key is rejected (401); an
+> ack up to the first cursor prunes exactly the first command and leaves the second; replaying
+> that same ack prunes nothing (200, not an error); a second ack past the remaining cursor prunes
+> it and leaves the queue empty; and acking against a made-up `device_id` is 404. A second probe
+> confirmed the part the first one couldn't, since it acked everything before deleting: queuing a
+> command and then deleting the device via `DELETE /devices/:device_id` removes the queued
+> command too, by the same `ON DELETE CASCADE` the initial schema already uses for `records` and
+> `grants` — migration `1785670000000_device-commands.js` adds the table and, per the same lesson
+> `1785660000000_grants-device-b-index.js` already paid for, its `device_id` index up front.
 
 ### 11.5 Command types come from the schema, not a free-form channel
 

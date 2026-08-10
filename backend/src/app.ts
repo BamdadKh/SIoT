@@ -10,6 +10,7 @@ import { redisPlugin } from './db/redis.js';
 import { requireSession, sessionPlugin } from './lib/require-session.js';
 import { authRoutes } from './routes/auth.js';
 import { changePasswordRoutes } from './routes/change-password.js';
+import { commandRoutes, deviceCommandRoutes } from './routes/commands.js';
 import { deviceRoutes } from './routes/devices.js';
 import { deviceGrantRoutes, grantRoutes } from './routes/grants.js';
 import { healthRoutes } from './routes/health.js';
@@ -105,6 +106,11 @@ export async function buildApp() {
   // the server sees, so this adds no new leak.
   await app.register(deviceGrantRoutes);
 
+  // Public for the same reason as recordRoutes and deviceGrantRoutes: a
+  // device polls for its own queued commands and acks them by signature, and
+  // holds no session either way (design Section 11, roadmap 11.2/11.3/11.4).
+  await app.register(deviceCommandRoutes);
+
   // Authenticated: the hook belongs to this scope, so anything registered here
   // is protected by construction. New routes go inside unless there is a reason
   // they cannot — that way the easy mistake is a 401, not an open endpoint.
@@ -115,6 +121,7 @@ export async function buildApp() {
     await scope.register(changePasswordRoutes);
     await scope.register(deviceRoutes);
     await scope.register(grantRoutes);
+    await scope.register(commandRoutes);
   });
 
   // Dev-only convenience: serve the plain-HTML test console from the API origin

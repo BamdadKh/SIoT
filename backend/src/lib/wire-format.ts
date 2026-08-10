@@ -77,3 +77,33 @@ export const UINT64_MAX = (1n << 64n) - 1n;
  * otherwise look coupled by accident.
  */
 export const GRANT_BLOB_BYTES = 60;
+
+/**
+ * `device_commands.id`, the delivery cursor named in roadmap 11.2/11.4
+ * (design Section 11, not yet written). A bigserial is a signed 64-bit
+ * integer, narrower than `SEQ_MAX_DIGITS`/`UINT64_MAX` above — kept as its
+ * own bound rather than reusing those, since a delivery cursor and a
+ * device's own `seq` are unrelated concepts that happen to share a
+ * decimal-string wire shape.
+ */
+export const CURSOR_MAX_DIGITS = 19;
+export const CURSOR_MAX = (1n << 63n) - 1n;
+
+/**
+ * `AES-256-GCM(device_command_key, random nonce, {command_seq, type, args}, AAD)`,
+ * design Section 11.0/11.2. Same floor reasoning as `RECORD_CIPHERTEXT_MIN_BYTES`;
+ * the ceiling is smaller than a record's, since a command's `{type, args}`
+ * (roadmap 11.5) is meant to stay small by construction and this is a
+ * generous cap on top of that rather than the real bound.
+ */
+export const COMMAND_CIPHERTEXT_MIN_BYTES = 16 + 1;
+export const COMMAND_CIPHERTEXT_MAX_BYTES = 1024;
+
+/**
+ * A random 96-bit nonce — design Section 11.0's deliberate reversal of the
+ * record nonce rule (the browser is the encrypting party here and has a real
+ * CSPRNG, unlike a device at boot). Same size as `NONCE_BYTES` but kept as
+ * its own constant: one is derived from `seq`, this one is CSPRNG, and the
+ * two must not look coupled by accident.
+ */
+export const COMMAND_NONCE_BYTES = 12;
