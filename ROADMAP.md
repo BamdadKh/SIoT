@@ -558,10 +558,13 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > than merely empty. Then separately: write, erase, close the port, reopen it (which
 > hard-resets the board over DTR/RTS), and `READ-ID` still returns `-`, so the erase is in
 > flash rather than in RAM. Two more `node --test` cases for the codec; the suite is 129.
-- [ ] Forward note for 5.6: a 404 from `POST /records` means this device has been deleted and
+- [x] Forward note for 5.6: a 404 from `POST /records` means this device has been deleted and
       no amount of retrying will change that, so it must not be handled as the same class of
       failure as a network drop. A deleted device that retries forever is a board flattening
-      its battery against a server that will never accept it
+      its battery against a server that will never accept it. **Closed by 5.6 itself**: the
+      firmware's `isDeleted()` latch stops further sends on a 404 without touching the radio
+      again, which is this note acted on rather than just written down. Left unticked until
+      now purely because 5.6 landed in a later pass and nothing came back to check this box
 - [ ] Test: delete a paired device and confirm the records are gone from Postgres, the vault
       entry is gone, and the `DEVICE_ID` can be registered again; delete an orphan and an
       unregistered device and confirm each takes its one step and no more; kill the vault
