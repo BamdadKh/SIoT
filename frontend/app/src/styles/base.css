@@ -875,6 +875,123 @@ a:hover {
   padding-top: 1px;
 }
 
+/* --- records (roadmap 6.3) ----------------------------------------------- */
+
+/*
+ * The same construction as `.device-list`, and deliberately so: both are a
+ * register of what exists, subdivided by light rules inside one strong border,
+ * rather than a card per entry floating on the ground. A device page that used
+ * one shape for its devices and another for its readings would be two designs.
+ */
+.record-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+.record + .record,
+.record + .record-step,
+.record-step + .record {
+  border-top: 1px solid var(--line);
+}
+
+.record {
+  padding: var(--sp-3) var(--sp-5);
+}
+
+/* Where it sits in the sequence on the left, when it arrived on the right. The
+   sequence leads because it is the authoritative order (design 7.1) and the
+   arrival time is only as trustworthy as the server. */
+.record-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  font-size: var(--size-small);
+}
+
+.record-seq {
+  color: var(--ink-muted);
+  /* The list's own mono is set for 22-character identifiers; a sequence gloss is
+     a sentence and wants the label size rather than the value size. */
+  font-size: var(--size-label);
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.record-when {
+  color: var(--ink-muted);
+  text-align: right;
+}
+
+/* The payload. A grid rather than a flex wrap so the values line up down the
+   column: a run of readings is read vertically, one key against the last. */
+.record-readings {
+  margin: var(--sp-3) 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--sp-2) var(--sp-4);
+}
+
+.record-reading {
+  min-width: 0;
+}
+
+.record-reading dt {
+  font-size: var(--size-label);
+  letter-spacing: -0.02em;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+.record-reading dd {
+  margin: 2px 0 0;
+  font-size: var(--size-small);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* The device's own clock, kept visually subordinate to the arrival time above
+   it. Not because it matters less, but because it is the one of the two that
+   nothing verifies, and a page that gave them equal weight would be claiming
+   they are equally trustworthy. */
+.record-clock {
+  margin: var(--sp-3) 0 0;
+  color: var(--ink-faint);
+}
+
+/* A payload this version cannot render, or a record that would not open. Rust,
+   the token reserved for something the client cannot read, rather than
+   `--alarm`: nothing here is a mistake the person made or can retry. */
+.record-problem {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--size-small);
+  line-height: 1.55;
+  color: var(--rust-deep);
+}
+
+.record-refused {
+  background: var(--rust-ground);
+}
+
+/*
+ * What sits between two records: a gap, or a restart. Set into the ground the
+ * way `.device-note` is, and in neutral ink on purpose. Roadmap 6.3 is explicit
+ * that a gap is a signal and not an error: firmware drops a record it cannot
+ * deliver rather than buffering it (5.6), so a flaky afternoon produces these
+ * and nothing is wrong.
+ */
+.record-step {
+  padding: var(--sp-3) var(--sp-5);
+  background: var(--paper);
+  font-size: var(--size-small);
+  line-height: 1.55;
+  color: var(--ink-muted);
+}
+
 /* --- layout helpers ------------------------------------------------------ */
 
 .stack {
@@ -976,6 +1093,23 @@ a:hover {
 
   .rollback-warning {
     padding: var(--sp-5) var(--sp-4);
+  }
+
+  /* The sequence gloss and a full local timestamp do not share a phone's width.
+     Same treatment as the device row's liveness column above. */
+  .record-head {
+    flex-direction: column;
+    gap: var(--sp-1);
+  }
+
+  .record-when {
+    text-align: left;
+  }
+
+  .record,
+  .record-step {
+    padding-left: var(--sp-4);
+    padding-right: var(--sp-4);
   }
 
   .slot {

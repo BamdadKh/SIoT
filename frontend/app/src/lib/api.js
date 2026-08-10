@@ -144,6 +144,35 @@ export function fetchDevices() {
 }
 
 /**
+ * One page of a device's records, as the server stored them (roadmap 6.2).
+ *
+ * Opaque here and opaque to the server: `ciphertext` opens only under the
+ * `device_data_key` derived from the `DEVICE_SECRET` in the vault, which is why
+ * this returns blobs and `use-device-records.js` is what turns them into
+ * readings.
+ *
+ * `sig` is deliberately not in the response and its absence is not a gap: the
+ * signature authenticates a record to the *server*, which cannot decrypt it,
+ * while a reader holding `device_data_key` already has the record's own GCM tag
+ * over an AAD binding the `DEVICE_ID` and the `seq`, which is strictly stronger.
+ *
+ * @param {string} deviceId base64url
+ * @param {{ beforeSeq?: string, afterSeq?: string, order?: 'asc'|'desc', limit?: number }} [page]
+ * @returns {Promise<{ records: Array<{ seq: string, nonce: string, ciphertext: string,
+ *                                      created_at: string }> }>}
+ */
+export function fetchRecords(deviceId, { beforeSeq, afterSeq, order, limit } = {}) {
+  const query = new URLSearchParams();
+  if (beforeSeq !== undefined) query.set('before_seq', beforeSeq);
+  if (afterSeq !== undefined) query.set('after_seq', afterSeq);
+  if (order !== undefined) query.set('order', order);
+  if (limit !== undefined) query.set('limit', String(limit));
+
+  const suffix = query.size > 0 ? `?${query}` : '';
+  return request('GET', `/devices/${encodeURIComponent(deviceId)}/records${suffix}`);
+}
+
+/**
  * Removes the server's half of a device: the row, and by cascade every record
  * it uploaded and every grant naming it on either side.
  *

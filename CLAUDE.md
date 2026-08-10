@@ -665,6 +665,36 @@ signing input, encrypt, decrypt. `decryptRecord` re-checks the nonce against the
 decrypting, because the server runs that check too and the server is the party this defends
 against.
 
+**Phase 6.3 is done, closing the loop the whole product exists for: records go up as
+ciphertext and come back down as readings the server never saw.**
+`components/DeviceReadings.jsx` is a section on `DeviceDetail` above rename, fed by
+`lib/use-device-records.js` (fetch, derive `device_data_key` from the vault entry, decrypt) and
+`lib/records.js` (gaps, payload shape, value formatting; React-free and crypto-free, so
+`node --test` reaches it). It is not the Phase 7 dashboard and does not pretend to be: with no
+schema, a reading is a key and a value.
+
+Three properties here are load-bearing and easy to reverse by accident. **A record that will
+not open stays in the list**, counted and rendered in place, because dropping it reports a
+shorter history than the device has (the same rule `vault-document.js` applies to entries it
+cannot parse); a wrong key, a tampered blob, a relocated record and a mismatched nonce are one
+refusal because they mean one thing to a reader. **A gap is claimed only between two records
+actually held, and never across a `boot_epoch` boundary**: the counter resets on every boot and
+whether a boot's first record carries 0 or 1 is the firmware's business, so a boundary is
+reported as a restart, which is a true statement about the sequence and asserts nothing about
+what either boot sent. And **a gap is worded as a signal, never a diagnosis**, the same rule
+`last-seen.js` follows: firmware drops a record it cannot deliver rather than buffering it
+(5.6), and a withholding server is indistinguishable from a device that stopped.
+
+`GET /devices/:id/records` grew `order` (`asc`/`desc`) and `before_seq` to make this possible.
+Ascending-only is right for 6.4's export and useless for a device page, where reaching the
+newest record meant paging through every record before it; the index is already
+`(device_id, seq desc)`. `order` is an enum mapped through a lookup rather than interpolated,
+and the bounds build the `where` clause rather than defaulting to a sentinel above the uint64
+range. Verified by a throwaway probe, 35 checks, including that a page stays contiguous in
+`seq` between its bounds in either direction, which is what makes a gap between two rows real
+and a gap at a page edge unclaimable. **Not walked in a browser**: no Chrome session was
+available, same gap 4.9 recorded.
+
 **Phase 10, device notifications, is in the roadmap and unbuilt.** Its three load-bearing
 decisions live in ROADMAP.md 10.0 and are the kind that get reversed by accident: a
 notification is an ordinary record on the ordinary path; the record type stays inside the
@@ -693,8 +723,9 @@ pattern as every backend-only phase before it): 20 checks covering cursor orderi
 rejection, wrong-signature rejection, ack idempotency, and partial pruning, plus a second probe
 confirming the cascade delete. No automated test; `backend/` still has no test harness.
 
-The frontend suite is 129 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
-`sequence.js`, `provisioning-protocol.js` and `cbor.js` are React-free so the suite reaches them
-directly, and `protocol-vectors.test.js` re-derives every published vector from scratch.
+The frontend suite is 150 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
+`sequence.js`, `records.js`, `provisioning-protocol.js` and `cbor.js` are React-free so the
+suite reaches them directly, and `protocol-vectors.test.js` re-derives every published vector
+from scratch.
 The screens themselves are still uncovered, same gap as the rest of the client and all of
 `backend/`.

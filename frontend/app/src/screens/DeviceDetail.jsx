@@ -3,7 +3,7 @@ import { findDevice, removeDevice, renameDevice, DEVICE_NAME_MAX_LENGTH } from '
 import { ApiError, deleteDevice } from '../lib/api.js';
 import { loadVault, storeVault, VaultRollbackError } from '../lib/vault-store.js';
 import { useVaultDevices } from '../lib/use-vault-devices.js';
-import { ORPHAN, UNREGISTERED } from '../lib/device-list.js';
+import { ORPHAN, PAIRED, UNREGISTERED } from '../lib/device-list.js';
 import { describeLastSeen, exactLastSeen } from '../lib/last-seen.js';
 import { describeSequence } from '../lib/sequence.js';
 import { Link } from '../lib/router.jsx';
@@ -13,6 +13,7 @@ import { RollbackWarning } from '../components/RollbackWarning.jsx';
 import { OrphanNote, UnregisteredNote } from '../components/DeviceStateNote.jsx';
 import { RevealCredentials } from '../components/RevealCredentials.jsx';
 import { EraseBoard } from '../components/EraseBoard.jsx';
+import { DeviceReadings } from '../components/DeviceReadings.jsx';
 
 /**
  * One device (roadmap 4.9).
@@ -124,6 +125,20 @@ function Found({ username, deviceId, state, reload, onDeleted }) {
       ) : null}
 
       {device.state === ORPHAN ? <OrphanNote className="unreadable device-section" /> : null}
+
+      {/* Readings come before the management sections because they are what
+          someone opened this page to see; rename, reveal and delete are things
+          done to a device rather than things it said.
+
+          Only for a paired device, and the two exclusions are not the same
+          omission. An orphan has no vault entry, so there is no
+          `DEVICE_SECRET` to derive a key from and its records are unreadable
+          for good, which `OrphanNote` already states. An unregistered device
+          has the key and no server row, so there is nothing to fetch and
+          `GET /devices/:id/records` would 404; `UnregisteredNote` says that,
+          and an empty readings section beneath it would be a second, vaguer
+          way of saying the same thing. */}
+      {device.state === PAIRED && entry ? <DeviceReadings entry={entry} /> : null}
 
       {/* An orphan has no vault entry, so there is no name to change, nothing to
           derive keys from, and no secret to reveal. Roadmap 4.9 is explicit that

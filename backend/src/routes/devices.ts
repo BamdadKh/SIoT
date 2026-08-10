@@ -62,10 +62,24 @@ const RecordsParams = Type.Object({ device_id: DeviceId });
  * authoritative order (Section 7.1), the device's own clock is not trusted for
  * anything, and it is already the index's sort key (`devices_seq_unique`'s
  * partner index, `device_id, seq desc`).
+ *
+ * **Both directions, because the two readers of this route want opposite ends.**
+ * An export (roadmap 6.4) walks the whole history forwards from the beginning,
+ * which is what `after_seq` with the default ascending order is for. A device
+ * page (6.3) wants the newest page first and then older ones on demand, and
+ * with an ascending cursor the only way to reach the newest record is to page
+ * through every record before it. `order: 'desc'` with `before_seq` is that walk
+ * run the other way. The index is already `(device_id, seq desc)`, so the
+ * direction this was missing is the one the index was built for.
  */
 const RecordsQuery = Type.Object({
-  /** Exclusive lower bound; omit for the oldest page. */
+  /** Exclusive lower bound; omit for the oldest record. */
   after_seq: Type.Optional(SeqString),
+  /** Exclusive upper bound; omit for the newest record. */
+  before_seq: Type.Optional(SeqString),
+  order: Type.Optional(
+    Type.Union([Type.Literal('asc'), Type.Literal('desc')], { default: 'asc' }),
+  ),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: RECORDS_PAGE_MAX })),
 });
 
@@ -219,9 +233,11 @@ export const deviceRoutes: FastifyPluginAsyncTypebox = async (app) => {
    * the roadmap item's own "stub owner-only check for now".
    *
    * The server never decrypts; it hands back exactly the columns it stored in
-   * `POST /records` (Section 7.4) plus when it received them, in ascending
-   * `seq` order so gaps within a `boot_epoch` are as easy to see as the design's
-   * client-side gap detection (6.3) needs them to be.
+   * `POST /records` (Section 7.4) plus when it received them, in `seq` order so
+   * gaps within a `boot_epoch` are as easy to see as the design's client-side
+   * gap detection (6.3) needs them to be. A page is contiguous in `seq` between
+   * its bounds in either direction, which is what lets the client claim a gap
+   * between two rows it holds and never claim one at the edge of a page.
    */
   app.get(
     '/devices/:device_id/records',
@@ -244,15 +260,28 @@ export const deviceRoutes: FastifyPluginAsyncTypebox = async (app) => {
       // should not be distinguishable from a made-up one.
       if (!owned) throw httpError(404, 'unknown device_id');
 
-      let afterSeq = 0n;
-      if (req.query.after_seq !== undefined) {
+      const bound = (value: string | undefined) => {
+        if (value === undefined) return undefined;
         try {
-          afterSeq = parseSeq(req.query.after_seq);
+          return parseSeq(value).toString();
         } catch (err) {
           throw httpError(400, (err as Error).message);
         }
-      }
+      };
+      const afterSeq = bound(req.query.after_seq);
+      const beforeSeq = bound(req.query.before_seq);
       const limit = req.query.limit ?? RECORDS_PAGE_DEFAULT;
+      // Not interpolated from the query value: an enum the schema already
+      // narrowed to two literals, mapped through this table rather than
+      // concatenated, so the SQL string stays a constant either way.
+      const direction = req.query.order === 'desc' ? 'desc' : 'asc';
+
+      // Built rather than fixed, because a sentinel upper bound would have to be
+      // a literal above the uint64 range and that is a number to get wrong once.
+      const params: unknown[] = [deviceId];
+      const conditions = ['device_id = $1'];
+      if (afterSeq !== undefined) conditions.push(`seq > $${params.push(afterSeq)}`);
+      if (beforeSeq !== undefined) conditions.push(`seq < $${params.push(beforeSeq)}`);
 
       const rows = await app.pg.query<{
         seq: string;
@@ -262,10 +291,10 @@ export const deviceRoutes: FastifyPluginAsyncTypebox = async (app) => {
       }>(
         `select seq, nonce, ciphertext, created_at
            from records
-          where device_id = $1 and seq > $2
-          order by seq asc
-          limit $3`,
-        [deviceId, afterSeq.toString(), limit],
+          where ${conditions.join(' and ')}
+          order by seq ${direction}
+          limit $${params.push(limit)}`,
+        params,
       );
 
       reply.header('cache-control', 'no-store');

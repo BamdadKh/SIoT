@@ -748,14 +748,114 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > 401, and confirmed a made-up `device_id` gets the same 404 a real-but-foreign one does. No
 > automated test.
 
-### 6.3 Client-side decrypt & display
-- [ ] Fetch device's `device_data_key` from decrypted vault
-- [ ] Decrypt records client-side, verify AAD matches expected device/type
-- [ ] Detect sequence gaps within a `boot_epoch` and surface as "possible missing data" in UI (not an error, just a signal)
+> **Reopened by 6.3 and closed again: the route now pages in both directions.** As shipped it
+> was ascending-only, which is right for an export (6.4 walks the whole history forwards) and
+> useless for a device page, where the only way to reach the *newest* record was to page
+> through every record before it. Added: `order` (`asc`, the default, or `desc`) and
+> `before_seq`, the exclusive upper bound that `after_seq` already was on the lower side. The
+> index is `(device_id, seq desc)` from the initial schema, so the direction that was missing
+> is the one the index was built for. `order` is an enum of two literals mapped through a
+> lookup rather than interpolated, so the SQL string stays a constant; the bounds are built
+> into the `where` clause rather than defaulting to a sentinel above the uint64 range, which
+> would have been a magic number to get wrong once. A page stays contiguous in `seq` between
+> its bounds in either direction, which is the property 6.3's gap detection rests on: adjacency
+> in a response is adjacency in what the server holds, so a gap between two rows is real and a
+> gap at the edge of a page is not claimable.
 
-> Left unticked: `frontend/app/` UI work, same as the four items 4.8 left open, and gated by
-> the same CLAUDE.md rule that new UI is Opus-only. `GET /devices/:id/records` (6.2) is done
-> and independently testable, so this is a clean stopping point rather than a partial one.
+### 6.3 Client-side decrypt & display
+- [x] Fetch device's `device_data_key` from decrypted vault — `app/src/lib/use-device-records.js`,
+      HKDF over the `DEVICE_SECRET` the vault already holds open on this screen. Derived once
+      per page and zeroed when the page is done, rather than once per screen: a key that lives
+      as long as the tab is a key sitting in memory through every idle minute someone leaves it
+      open. Best effort in a garbage-collected runtime, the same caveat `deriveAccountKeys`
+      states, and it costs a line
+- [x] Decrypt records client-side, verify AAD matches expected device/type — `decryptRecord`
+      (`lib/crypto/record.js`, already shipped with 4.7) does both: the AAD binds
+      `version || DEVICE_ID || record_type || seq`, so a record moved to another device or to a
+      different sequence position will not open, and the nonce is re-checked against the `seq`
+      *before* decrypting, which is the client's own copy of the server's check 3. The server
+      having run it is not a reason to skip it, since the server is the party this defends
+      against. **A record that will not open stays in the list**, counted and rendered in place:
+      dropping it would report a shorter history than the device has, the same mistake
+      `vault-document.js` refuses to make with entries it cannot parse. A wrong key, a tampered
+      blob, a relocated record and a mismatched nonce are one refusal because they mean one
+      thing to a reader
+- [x] Detect sequence gaps within a `boot_epoch` and surface as "possible missing data" in UI
+      (not an error, just a signal) — `app/src/lib/records.js`, and the wording is the whole
+      point of the item. Firmware drops a record it cannot deliver rather than buffering it
+      (5.6), so a gap is the ordinary outcome of a flaky afternoon; it is set in neutral ink
+      between the two rows it sits between, not in `--alarm` and not in rust
+
+> **Three things it would have been easy to over-claim, and what is claimed instead.**
+>
+> **Across a `boot_epoch` boundary there is no gap.** The counter resets on every boot and
+> whether a boot's first record carries 0 or 1 is the firmware's business, which is the same
+> reason `sequence.js` says "boot 3, message 412" rather than "412 records". A boundary is
+> reported as a restart, which is a true statement about the sequence and asserts nothing about
+> what either boot did or did not send. Several boots at once (epoch 3 to epoch 7) is reported
+> as several restarts, which is likewise only what the numbers say.
+>
+> **At the edge of a page there is no gap either.** Only pairs actually held are compared.
+> Adjacency to a record that was never fetched is not adjacency, and the "Load older" control
+> exists precisely because the client does not hold the whole history.
+>
+> **A gap is a lower bound, like every other freshness signal here.** A server withholding a run
+> of records at the end of the sequence is indistinguishable from a device that stopped
+> reporting, which is the asymmetry `last-seen.js` is built around. So the phrasing says records
+> are missing and never why, and a test asserts that absence rather than leaving it to review.
+
+> **The screen is `components/DeviceReadings.jsx`, a section on `DeviceDetail` above rename.**
+> Readings are what someone opened that page to see; rename, reveal and delete are things done
+> *to* a device rather than things it said. It is not the Phase 7 dashboard and does not
+> pretend to be: without a schema, a reading is a key and a value, and inventing units would be
+> guessing. Rendered only for a `PAIRED` device, and the two exclusions are different
+> omissions rather than one: an orphan has no `DEVICE_SECRET` and so no key (`OrphanNote`
+> already says its records are unreadable for good), and an unregistered device has the key and
+> no server row, so `GET /devices/:id/records` would 404 (`UnregisteredNote` says that). An
+> empty readings panel under either would be a second, vaguer way of saying what is already
+> said.
+>
+> **Both timestamps, labelled as two different things**, which 6.4 states as a rule for the
+> export and which has to hold on screen first. The arrival time is the server's and leads,
+> because the device's own `t` comes from a clock nothing verifies. `t = 0` is the protocol's
+> "this device has no clock" and never renders as 1970; a device where every record says so
+> gets one line above the list rather than the same line on every row, since it is a property
+> of the firmware's access to time rather than of any one record.
+>
+> **The payload allowlist is 7.2's discipline arriving early.** The CBOR profile has already
+> refused tags, byte strings and non-text keys by the time anything reaches the screen, but it
+> has not refused a record that is an array or an `r` holding a nested map, because those are
+> legal CBOR and illegal payloads. A value that is not a scalar is named and set aside rather
+> than rendered as `[object Object]`. Floats are trimmed to seven significant digits for
+> display (a half-width float saying 21.4 arrives as 21.399999618530273) and integers outside
+> the safe-integer range keep every digit, since the decoder hands those back as `bigint`
+> rather than rounding and formatting must not put the rounding back.
+>
+> Readings keep wire order and are deliberately not re-sorted. Nothing verifies a payload's
+> encoding, so a port may sort its keys and the reference encoder in `cbor.js` does; re-sorting
+> here would take the choice away from ports that keep a meaningful order and buy nothing from
+> the ones that do not. (Found by a probe assertion that assumed otherwise, not by review.)
+>
+> Verified against a running server with a throwaway probe (since deleted, same pattern as
+> every backend pass), 35 checks. Eight records posted through `POST /records` with a real
+> browser-derived device: a deliberate four-record gap inside one boot, a two-boot restart, a
+> clockless boot, a uint64 reading, a text reading, and one blob encrypted under a foreign key.
+> Then: the default order is still ascending; `order=desc` holds the same set reversed;
+> `desc` with a limit is the newest page rather than the oldest; `before_seq` walks backwards
+> without repeating or skipping a boundary; both bounds together are exclusive on each side; an
+> unknown `order` is a 400 rather than a silent default and so is a malformed `before_seq`;
+> seven of the eight records open and the eighth refuses *in place* rather than vanishing; the
+> gap is found, sized at three and located in boot 1; the restart is a restart and not a gap;
+> and `t = 0` reads as no clock. 21 new `node --test` cases in `test/records.test.js`; the
+> suite is 150, up from 129.
+>
+> **Not walked in a browser.** The suite passes, the client builds, and the probe drives the
+> same modules the screen imports, but the screens are uncovered as always and no Chrome
+> session was available to this pass (the same gap 4.9 recorded). Hand test: sign in, unlock,
+> open the device, and check the list renders newest first with the gap note between message 2
+> and message 6 of boot 1, the restart note between boot 1 and boot 3, the refused record in
+> rust, and "Load older" behaving at a page boundary (the page size is 50, so it needs more
+> than 50 records to exercise).
 
 ### 6.4 Downloading records
 
