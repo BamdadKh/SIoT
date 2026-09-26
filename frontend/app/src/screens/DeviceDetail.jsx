@@ -14,6 +14,7 @@ import { OrphanNote, UnregisteredNote } from '../components/DeviceStateNote.jsx'
 import { RevealCredentials } from '../components/RevealCredentials.jsx';
 import { EraseBoard } from '../components/EraseBoard.jsx';
 import { DeviceReadings } from '../components/DeviceReadings.jsx';
+import { EXPORT_SECTION_ID, ExportRecords } from '../components/ExportRecords.jsx';
 
 /**
  * One device (roadmap 4.9).
@@ -138,7 +139,12 @@ function Found({ username, deviceId, state, reload, onDeleted }) {
           `GET /devices/:id/records` would 404; `UnregisteredNote` says that,
           and an empty readings section beneath it would be a second, vaguer
           way of saying the same thing. */}
-      {device.state === PAIRED && entry ? <DeviceReadings entry={entry} /> : null}
+      {device.state === PAIRED && entry ? (
+        <>
+          <DeviceReadings entry={entry} />
+          <ExportRecords entry={entry} />
+        </>
+      ) : null}
 
       {/* An orphan has no vault entry, so there is no name to change, nothing to
           derive keys from, and no secret to reveal. Roadmap 4.9 is explicit that
@@ -460,6 +466,16 @@ function DeleteSection({ username, device, reload, onDeleted }) {
               holding these credentials will go on uploading into refusals until it is provisioned
               for another device or erased.
             </p>
+            {/* Roadmap 4.9: the moment someone is about to destroy the readings is
+                the only moment offering to keep them is useful. Only when both
+                halves exist, which is exactly when the section it points at is
+                on the page. */}
+            {onServer && inVault ? (
+              <p>
+                The readings exist nowhere else. Want a copy first?{' '}
+                <a href={`#${EXPORT_SECTION_ID}`}>Download them</a>
+              </p>
+            ) : null}
           </div>
         ) : null}
 

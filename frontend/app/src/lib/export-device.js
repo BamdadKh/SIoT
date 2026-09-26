@@ -32,7 +32,8 @@ import {
  * @param {{ id: string, secret: string, name: string }} entry the vault's record of the device.
  * @param {{ format: 'json'|'csv', onProgress?: (p: { fetched: number, unopened: number }) => void,
  *           signal?: AbortSignal }} options
- * @returns {Promise<{ text: string, mime: string, extension: string, recordCount: number }>}
+ * @returns {Promise<{ text: string, mime: string, extension: string, recordCount: number,
+ *                     unopened: number }>}
  */
 export async function exportDeviceRecords(entry, { format, onProgress, signal }) {
   const idBytes = deviceIdBytes({ id: entry.id });
@@ -61,14 +62,16 @@ export async function exportDeviceRecords(entry, { format, onProgress, signal })
         }),
     });
 
+    const unopened = records.filter((record) => record.error !== null).length;
     const built = { deviceName: entry.name, deviceId: entry.id, exportedAt: new Date(), records };
     return format === 'csv'
-      ? { text: buildCsvExport(built), mime: 'text/csv', extension: 'csv', recordCount: records.length }
+      ? { text: buildCsvExport(built), mime: 'text/csv', extension: 'csv', recordCount: records.length, unopened }
       : {
           text: buildJsonExport(built),
           mime: 'application/json',
           extension: 'json',
           recordCount: records.length,
+          unopened,
         };
   } finally {
     dataKey.fill(0);

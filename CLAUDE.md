@@ -723,13 +723,15 @@ pattern as every backend-only phase before it): 20 checks covering cursor orderi
 rejection, wrong-signature rejection, ack idempotency, and partial pruning, plus a second probe
 confirming the cascade delete. No automated test; `backend/` still has no test harness.
 
-**Phase 6.4's non-UI half is done: the export format, not the button.**
+**Phase 6.4 is done, and 4.9's last client item with it.**
 `app/src/lib/export-records.js` walks a device's whole history by `after_seq` and builds a
 lossless JSON file and a spreadsheet-friendly CSV, with gaps, restarts and unopenable records
 carried into the file rather than left on screen; `export-device.js` is the thin browser
-adapter. Nothing imports either yet: the section on `DeviceDetail` (button, progress, the
-plaintext-on-disk cost stated at the click, object-URL revoke) is new UI and is Opus-only. The
-CSV defuses text a spreadsheet would execute. Also fixed on the way: `cbor.js` silently dropped
+adapter; `components/ExportRecords.jsx` is the Download section under Readings on
+`DeviceDetail`, with the plaintext-on-disk cost in a `.board-note` above the buttons, the
+work bar and a live count while it walks, and the object URL revoked after the download. The
+delete confirmation links to it. The CSV defuses text a spreadsheet would execute. Verified
+against a running server by probe; not walked in a browser. Also fixed on the way: `cbor.js` silently dropped
 a reading named `__proto__`. **5.6's last hop is still open**: `WiFiClientSecure` and the
 certificate pin need a WiFi network to point at, and the example sketch (which compiles
 against the current library) needs the SSID and password filled in.
