@@ -242,7 +242,16 @@ function decodeItem(reader, depth = 0) {
         // Two entries claiming one key is ambiguous, and which one wins is a
         // property of the decoder rather than of the data. Refuse instead.
         if (Object.hasOwn(map, key)) throw new Error(`cbor: duplicate map key ${JSON.stringify(key)}`);
-        map[key] = decodeItem(reader, depth + 1);
+        // Not `map[key] = ...`: for the key "__proto__" that assignment sets the
+        // prototype (or is ignored, for a scalar) instead of creating an entry,
+        // so a device reading of that name would silently vanish and the
+        // duplicate check above could never see it.
+        Object.defineProperty(map, key, {
+          value: decodeItem(reader, depth + 1),
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
       }
       return map;
     }

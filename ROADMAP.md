@@ -871,32 +871,32 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > That is a legitimate thing to want and it is not a path to shape apologetically, but the
 > cost gets stated at the moment of the export rather than in documentation nobody opens.
 
-- [ ] Walk the whole history rather than exporting the page on screen. `GET /devices/:id/records`
+- [x] Walk the whole history rather than exporting the page on screen. `GET /devices/:id/records`
       is cursor paginated at 500 (6.2), so an export is a loop over `after_seq` and needs
       real progress: a device reporting every thirty seconds for a year is thousands of round
       trips, and a silent freeze is indistinguishable from a hang
-- [ ] JSON is the lossless format: per record, `seq`, both timestamps, and the decrypted
+- [x] JSON is the lossless format: per record, `seq`, both timestamps, and the decrypted
       payload fields, plus a header naming the device, the `DEVICE_ID`, the export time and
       the `seq` range covered
-- [ ] CSV is the format people actually open: one row per record, columns from the union of
+- [x] CSV is the format people actually open: one row per record, columns from the union of
       reading keys seen across the whole export, blank where a record did not carry a key.
       Deriving the columns from Phase 7's schema instead becomes possible once schemas exist,
       but the union is what stays correct for a device whose readings changed shape mid-life
-- [ ] **Two timestamps, labelled as two different things**, never collapsed into one column.
+- [x] **Two timestamps, labelled as two different things**, never collapsed into one column.
       The device's own `t` from inside the payload is authenticated but comes from a clock
       nothing verifies; the server's `created_at` is when the upload arrived and is only as
       trustworthy as the server. `seq` is the sole authoritative order (design 7.1), so it is
       what the file is sorted by
-- [ ] Carry 6.3's gap detection into the file rather than leaving it on screen. A CSV whose
+- [x] Carry 6.3's gap detection into the file rather than leaving it on screen. A CSV whose
       rows run continuously across a `seq` gap is a lie about the data, and it is the artifact
       that outlives the UI that told the truth
-- [ ] Count records that opened under no key rather than dropping them, the same discipline
+- [x] Count records that opened under no key rather than dropping them, the same discipline
       `vault-document.js` applies to entries it cannot parse. After a re-provisioning (8.4)
       the old records are genuinely unopenable, and an export that quietly omitted them would
       report a shorter history than the device has
 - [ ] Revoke the object URL after the download and hold no copy of the assembled text. It is
       the same "reveal on demand, do not stay revealed" rule 4.6 states for credentials
-- [ ] Not v1, and worth writing down so it is a decision rather than an omission: an
+- [x] Not v1, and worth writing down so it is a decision rather than an omission: an
       **encrypted archive** (the raw blobs plus metadata, openable only with `DEVICE_SECRET`)
       is a real backup format and a different feature. It is worthless in the one flow that
       motivated this (exporting before a delete destroys the vault entry and therefore the
@@ -904,6 +904,44 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 - [ ] Test: export a device with a deliberate `seq` gap and a record the key will not open,
       and confirm both are visible in the file and not merely in the UI; confirm the row count
       matches an unpaged fetch, so the cursor loop is not dropping a page boundary
+
+> **The half of 6.4 that is not UI is built; the half that is has not been started.**
+> `app/src/lib/export-records.js` is the format and is React-free and crypto-free, so
+> `node --test` reaches it (`test/export-records.test.js`, 15 cases; the suite is 166, up
+> from 150). `app/src/lib/export-device.js` is the thin browser half that supplies the real
+> fetch and the real decryption and returns the file as a string. Neither is imported by a
+> screen yet.
+>
+> Two items above are ticked with less than they read as. **Progress** for the history walk
+> is reported through `onProgress` after every page and the walk can be aborted; nothing
+> renders it. **The gap and the unopened record reach the file** as a `sequence_note` column
+> (and per record in the JSON) and a `status` of `unopened`, worded exactly as the screen
+> words them, and the gap is claimed even before a record the key will not open, since `seq`
+> is the server's and needs no key.
+>
+> Decisions this pass made that the items did not: **the CSV defuses text a spreadsheet would
+> execute** (a leading apostrophe on text starting with `=`, `+`, `-`, `@`, tab or CR, column
+> names included), because a text reading is whatever a device's program chose to say and the
+> person opening the file is the one who runs it; numbers are written as numbers and are never
+> touched. **The CSV is not lossless and says so**: a missing reading and a null one are both
+> blank, whereas the JSON keeps every digit of a uint64 reading (hand-serialised, since
+> `JSON.stringify` throws on a bigint) and records a NaN or Infinity, which is how a failed
+> sensor read arrives, as `null` plus a `non_finite_readings` entry rather than turning it into
+> a lie. A reading whose key collides with a fixed column becomes `reading_<key>`. The walk
+> refuses a server that repeats or reorders `seq` rather than looping or emitting a file that
+> is not in `seq` order.
+>
+> **Left open, and why.** The object-URL revoke and the button, the progress display, and the
+> statement of the plaintext-on-disk cost at the moment of the click are a new section on
+> `DeviceDetail`: new UI, which is Opus-only and was not built in this pass. The test item is
+> met against an in-memory server (row count matches an unpaged read at every page size
+> including exact multiples; the gap and the unopened record are in both files) and not yet
+> against a running one, which needs Docker and the backend up.
+>
+> A bug found on the way and fixed: `cbor.js` decoded a map with `map[key] = ...`, so a
+> device reading named `__proto__` was silently dropped (the assignment sets a prototype, or
+> is ignored for a scalar) and the duplicate-key check could never see it. It is now
+> `Object.defineProperty`, with a test.
 
 ---
 

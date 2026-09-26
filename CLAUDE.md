@@ -723,7 +723,18 @@ pattern as every backend-only phase before it): 20 checks covering cursor orderi
 rejection, wrong-signature rejection, ack idempotency, and partial pruning, plus a second probe
 confirming the cascade delete. No automated test; `backend/` still has no test harness.
 
-The frontend suite is 150 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
+**Phase 6.4's non-UI half is done: the export format, not the button.**
+`app/src/lib/export-records.js` walks a device's whole history by `after_seq` and builds a
+lossless JSON file and a spreadsheet-friendly CSV, with gaps, restarts and unopenable records
+carried into the file rather than left on screen; `export-device.js` is the thin browser
+adapter. Nothing imports either yet: the section on `DeviceDetail` (button, progress, the
+plaintext-on-disk cost stated at the click, object-URL revoke) is new UI and is Opus-only. The
+CSV defuses text a spreadsheet would execute. Also fixed on the way: `cbor.js` silently dropped
+a reading named `__proto__`. **5.6's last hop is still open**: `WiFiClientSecure` and the
+certificate pin need a WiFi network to point at, and the example sketch (which compiles
+against the current library) needs the SSID and password filled in.
+
+The frontend suite is 166 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
 `sequence.js`, `records.js`, `provisioning-protocol.js` and `cbor.js` are React-free so the
 suite reaches them directly, and `protocol-vectors.test.js` re-derives every published vector
 from scratch.

@@ -123,3 +123,15 @@ test('a record-shaped payload round-trips exactly', () => {
   };
   assert.deepEqual(decodeCbor(encodeCbor(payload)), payload);
 });
+
+test('a reading named __proto__ is an ordinary entry, not a prototype assignment', () => {
+  const decoded = decodeCbor(bytes('a1695f5f70726f746f5f5f05'));
+  assert.equal(Object.hasOwn(decoded, '__proto__'), true);
+  assert.equal(decoded['__proto__'], 5);
+  assert.equal(Object.getPrototypeOf(decoded), Object.prototype);
+  // ...and a repeat of it is a duplicate like any other key.
+  assert.throws(
+    () => decodeCbor(bytes('a2695f5f70726f746f5f5f05695f5f70726f746f5f5f06')),
+    /duplicate map key/,
+  );
+});
