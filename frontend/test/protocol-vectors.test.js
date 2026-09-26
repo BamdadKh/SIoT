@@ -92,7 +92,7 @@ test('every published record reproduces byte for byte', async () => {
         ciphertext: toBase64Url(ciphertext),
         sig: toBase64Url(signature),
       },
-      `${where}: POST /records body`,
+      `${where}: POST /siot/records body`,
     );
   }
 });

@@ -54,6 +54,10 @@ function devCertificate() {
 
 export default defineConfig({
   root: 'app',
+  // Everything in this package lives under /siot; the domain root is reserved
+  // for a future cross-project overview, not this app. Matches BASE in
+  // app/src/lib/router.jsx and the /siot prefix backend/src/app.ts registers.
+  base: '/siot/',
   plugins: [react()],
   resolve: {
     /**
@@ -77,7 +81,7 @@ export default defineConfig({
     fs: { allow: [here('.')] },
     proxy: Object.fromEntries(
       API_PATHS.map((path) => [
-        path,
+        `/siot${path}`,
         {
           target: 'https://localhost:3030',
           // The backend presents the same self-signed certificate we are serving

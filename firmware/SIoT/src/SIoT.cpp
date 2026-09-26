@@ -561,7 +561,7 @@ SIoTStatus SIoTClient::post(const char *body) {
   tls.setTimeout(HTTP_TIMEOUT_MS / 1000);
 
   char url[160];
-  snprintf(url, sizeof(url), "%s/records", baseUrl_);
+  snprintf(url, sizeof(url), "%s/siot/records", baseUrl_);
 
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT_MS);

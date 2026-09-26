@@ -11,7 +11,7 @@
  *   nonce            0x00000000 || seq, so nonce reuse is structurally impossible
  *   encryption       AES-256-GCM, hardware accelerated, with the design 7.3 AAD
  *   signing          Ed25519 over AAD || nonce || ciphertext
- *   upload           POST /records over TLS with a pinned certificate
+ *   upload           POST /siot/records over TLS with a pinned certificate
  *
  * `begin()` takes no credentials, and that is the point of the whole
  * provisioning path (design 6): on the supported path the device already has
@@ -177,7 +177,7 @@ class SIoTClient {
   SIoTStatus send(uint8_t attempts = 3);
 
   /**
-   * Builds one record and hands back the `POST /records` body, without sending
+   * Builds one record and hands back the `POST /siot/records` body, without sending
    * it. Advances the sequence and clears the readings exactly as `send()` does.
    *
    * This is the seam design 6.1 asks for: WiFi is one transport, and a device on

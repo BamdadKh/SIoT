@@ -42,7 +42,6 @@ export const config = {
   port: Number(optional('PORT', '3030')),
   databaseUrl: required('DATABASE_URL'),
   redisUrl: required('REDIS_URL'),
-  serveTestFrontend: bool('SERVE_TEST_FRONTEND', false),
 
   // Keys the decoy salts that make `GET /salt` refuse to confirm whether an
   // account exists (design Section 3). Rotating it changes every decoy, which is

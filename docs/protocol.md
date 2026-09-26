@@ -12,6 +12,10 @@ accepted on exactly the same terms.
 Section numbers in the form `design 7.2` refer to `SIoT_Design_Document.md`, which is the
 reasoning behind everything here. This document is the byte-level form of it.
 
+**Every path in this document is mounted under `/siot`.** The domain root is reserved for
+other things this deployment may serve later; a conforming client's base URL is
+`https://<host>/siot`, and every path below is relative to that, not to the host root.
+
 ---
 
 ## 0. The shape of the thing
@@ -28,7 +32,7 @@ plaintext     = CBOR { t, r }
 ciphertext    = AES-256-GCM(device_data_key, nonce, plaintext, AAD)
 sig (64B)     = Ed25519(ed25519_priv, AAD || nonce || ciphertext)
 
-POST /records { device_id, seq, nonce, ciphertext, sig }      all base64url but seq
+POST /siot/records { device_id, seq, nonce, ciphertext, sig }      all base64url but seq
 ```
 
 Nothing in that chain requires a random number generator, a real-time clock, or any
@@ -210,13 +214,13 @@ stored blob.
 
 ---
 
-## 8. `POST /records`
+## 8. `POST /siot/records`
 
 Device-authenticated: no session, no cookie, no API key. Sending the record *is* the
 authentication.
 
 ```http
-POST /records
+POST /siot/records
 Content-Type: application/json
 
 {
@@ -267,7 +271,7 @@ tracked as design 15.1.
 
 ### Reading records back
 
-`GET /devices/:device_id/records` is session-authenticated and owner-scoped: it is for the
+`GET /siot/devices/:device_id/records` is session-authenticated and owner-scoped: it is for the
 owner's browser, not for a device. It returns `{ seq, nonce, ciphertext, created_at }` per
 record, cursor-paginated by `after_seq` (exclusive), ascending, up to 500 per page.
 
@@ -280,7 +284,7 @@ of it, so it would be 64 bytes per record buying a check the decryption already 
 `created_at` is the server's arrival time and is only as trustworthy as the server; the
 device's own `t` is inside the ciphertext, and the two are different claims.
 
-A device that has been *granted* another device's data reads `GET /devices/:device_id/grants`
+A device that has been *granted* another device's data reads `GET /siot/devices/:device_id/grants`
 instead, which is public because a device holds no session (design 9.3). That is Phase 8 and
 is out of scope for this document.
 
@@ -365,7 +369,7 @@ sig           eda32ffa4c49a5261bca278efe406d2cf2e4052daf1b6fbaab89789ee164d0bcd6
               de3d29d87d400dcd617d2475d5f9f71f5fcf0ce12887cd4d501c02
 ```
 
-The JSON file also carries the exact `POST /records` body for each, so a port can diff its
+The JSON file also carries the exact `POST /siot/records` body for each, so a port can diff its
 own request against a known-good one rather than against a description of one.
 
 ### Checking a port against them, in order

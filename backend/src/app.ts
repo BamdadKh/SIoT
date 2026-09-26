@@ -87,51 +87,64 @@ export async function buildApp() {
 
   await app.register(sessionPlugin);
 
-  // Public: reachable without a session, by necessity. `/signup` and `/login`
-  // are how you get one, and `/salt` has to answer before authentication is
-  // even possible — its own anti-enumeration design is what covers that.
-  await app.register(healthRoutes);
-  await app.register(authRoutes);
+  // Everything this deployment owns lives under one mount point, so a bare `/`
+  // on the public hostname belongs to whatever else that hostname serves later
+  // (a cross-project overview) rather than to this app by default.
+  await app.register(
+    async (mount) => {
+      // Public: reachable without a session, by necessity. `/signup` and `/login`
+      // are how you get one, and `/salt` has to answer before authentication is
+      // even possible — its own anti-enumeration design is what covers that.
+      await mount.register(healthRoutes);
+      await mount.register(authRoutes);
 
-  // Also public, but for a different reason: a device never holds a session,
-  // it signs (design Section 7.4). `requireSession` would just reject every
-  // request with a 401 before the signature — the real authentication — is
-  // ever checked.
-  await app.register(recordRoutes);
+      // Also public, but for a different reason: a device never holds a session,
+      // it signs (design Section 7.4). `requireSession` would just reject every
+      // request with a 401 before the signature — the real authentication — is
+      // ever checked.
+      await mount.register(recordRoutes);
 
-  // Public for the same reason: Device A's own firmware polls this for grants
-  // naming it as recipient (design 9.3), and it has no session either. The
-  // response is opaque ciphertext scoped by a 128-bit device_id, and design
-  // 13.1 already lists which devices hold grants on which others as metadata
-  // the server sees, so this adds no new leak.
-  await app.register(deviceGrantRoutes);
+      // Public for the same reason: Device A's own firmware polls this for grants
+      // naming it as recipient (design 9.3), and it has no session either. The
+      // response is opaque ciphertext scoped by a 128-bit device_id, and design
+      // 13.1 already lists which devices hold grants on which others as metadata
+      // the server sees, so this adds no new leak.
+      await mount.register(deviceGrantRoutes);
 
-  // Public for the same reason as recordRoutes and deviceGrantRoutes: a
-  // device polls for its own queued commands and acks them by signature, and
-  // holds no session either way (design Section 11, roadmap 11.2/11.3/11.4).
-  await app.register(deviceCommandRoutes);
+      // Public for the same reason as recordRoutes and deviceGrantRoutes: a
+      // device polls for its own queued commands and acks them by signature, and
+      // holds no session either way (design Section 11, roadmap 11.2/11.3/11.4).
+      await mount.register(deviceCommandRoutes);
 
-  // Authenticated: the hook belongs to this scope, so anything registered here
-  // is protected by construction. New routes go inside unless there is a reason
-  // they cannot — that way the easy mistake is a 401, not an open endpoint.
-  await app.register(async (scope) => {
-    scope.addHook('onRequest', requireSession);
-    await scope.register(sessionRoutes);
-    await scope.register(vaultRoutes);
-    await scope.register(changePasswordRoutes);
-    await scope.register(deviceRoutes);
-    await scope.register(grantRoutes);
-    await scope.register(commandRoutes);
-  });
+      // Authenticated: the hook belongs to this scope, so anything registered here
+      // is protected by construction. New routes go inside unless there is a reason
+      // they cannot — that way the easy mistake is a 401, not an open endpoint.
+      await mount.register(async (scope) => {
+        scope.addHook('onRequest', requireSession);
+        await scope.register(sessionRoutes);
+        await scope.register(vaultRoutes);
+        await scope.register(changePasswordRoutes);
+        await scope.register(deviceRoutes);
+        await scope.register(grantRoutes);
+        await scope.register(commandRoutes);
+      });
 
-  // Dev-only convenience: serve the plain-HTML test console from the API origin
-  // so there is no CORS setup and session cookies will just work. The real
-  // client will be a separate Vite app; this goes away then.
-  if (config.serveTestFrontend) {
-    const root = path.resolve(__dirname, '../../frontend');
-    await app.register(fastifyStatic, { root });
-    app.log.warn(`serving test frontend from ${root}`);
-  }
+      // The real client, built. Only in production: in dev the Vite dev server
+      // serves `app/` directly (`npm run dev` in frontend/) and proxies these
+      // same paths to this backend, so this block would just be dead weight
+      // fighting the dev server for the same routes.
+      if (!isDev) {
+        const distRoot = path.resolve(__dirname, '../../frontend/dist');
+        await mount.register(fastifyStatic, { root: distRoot, wildcard: false });
+        // SPA fallback: any unmatched GET under this mount is a client-side
+        // route (e.g. `/sign-up`, `/device/<id>`), not a missing file. Fastify's
+        // router tries exact and param routes before this catch-all, so it never
+        // shadows an actual API route.
+        mount.get('/*', async (_req, reply) => reply.sendFile('index.html', distRoot));
+      }
+    },
+    { prefix: '/siot' },
+  );
 
   return app;
 }

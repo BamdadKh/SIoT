@@ -21,12 +21,32 @@ function announce() {
 window.addEventListener('popstate', announce);
 
 /**
+ * Everything this app owns lives under `/siot` (the domain root is reserved
+ * for a future cross-project overview, not this app). This is the one place
+ * that fact is spelled out: every screen still writes and compares plain
+ * paths like `/sign-in`, and this strips/prepends the mount point so nothing
+ * else has to know it exists. Matches `base: '/siot/'` in vite.config.js.
+ */
+const BASE = '/siot';
+
+function stripBase(pathname) {
+  if (pathname === BASE) return '/';
+  if (pathname.startsWith(`${BASE}/`)) return pathname.slice(BASE.length);
+  return pathname;
+}
+
+function withBase(to) {
+  return to === '/' ? BASE : BASE + to;
+}
+
+/**
  * @param {string} to absolute path, e.g. '/sign-in'
  * @param {{ replace?: boolean }} [options]
  */
 export function navigate(to, { replace = false } = {}) {
-  if (to === window.location.pathname) return;
-  window.history[replace ? 'replaceState' : 'pushState'](null, '', to);
+  const target = withBase(to);
+  if (target === window.location.pathname) return;
+  window.history[replace ? 'replaceState' : 'pushState'](null, '', target);
   announce();
 }
 
@@ -36,7 +56,7 @@ export function usePath() {
       subscribers.add(notify);
       return () => subscribers.delete(notify);
     },
-    () => window.location.pathname,
+    () => stripBase(window.location.pathname),
   );
 }
 
@@ -50,7 +70,7 @@ export function Link({ to, children, ...rest }) {
   }
 
   return (
-    <a href={to} onClick={handleClick} {...rest}>
+    <a href={withBase(to)} onClick={handleClick} {...rest}>
       {children}
     </a>
   );

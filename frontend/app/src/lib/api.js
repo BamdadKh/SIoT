@@ -16,10 +16,13 @@ export class ApiError extends Error {
   }
 }
 
+/** Matches the /siot prefix backend/src/app.ts mounts every route under. */
+const API_BASE = '/siot';
+
 async function request(method, path, body) {
   let response;
   try {
-    response = await fetch(path, {
+    response = await fetch(`${API_BASE}${path}`, {
       method,
       headers: body === undefined ? undefined : { 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
