@@ -11,3 +11,6 @@ secrets.h
 
 # Self-signed dev TLS material — regenerate with `npm run gen-cert`
 certs/
+
+# Local learner notes for the vibe-wise plugin
+.vibe-wise/
