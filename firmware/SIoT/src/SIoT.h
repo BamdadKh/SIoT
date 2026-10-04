@@ -234,6 +234,7 @@ class SIoTClient {
   void buildNonce(uint8_t *nonce, uint64_t seq) const;
   SIoTStatus post(const char *body);
   void fail(const char *message);
+  void failNetwork(const char *message, int httpCode, int tlsCode, const char *tlsReason);
 
   const char *baseUrl_;
   const char *caCertPem_;
@@ -241,6 +242,8 @@ class SIoTClient {
   bool ready_;
   bool deleted_;
   const char *error_;
+  /* Backing store for error_ when the message is composed at runtime. */
+  char detail_[160];
 
   uint8_t deviceId_[SIOT_DEVICE_ID_BYTES];
   char deviceIdText_[SIOT_DEVICE_ID_TEXT_BYTES];

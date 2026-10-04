@@ -155,6 +155,24 @@ void SIoTClient::setServer(const char *baseUrl, const char *caCertPem) {
 
 void SIoTClient::fail(const char *message) { error_ = message; }
 
+/*
+ * A transport failure with the reason attached. HTTPClient's negative code says
+ * *that* it failed (refused, timed out, send/read error) and mbedTLS says *why*
+ * a handshake failed (an untrusted or expired certificate shows up here and
+ * nowhere else). Keeping both is what lets a person tell a firewall from a
+ * pin mismatch from a board whose clock is wrong, which "could not reach the
+ * server" cannot.
+ */
+void SIoTClient::failNetwork(const char *message, int httpCode, int tlsCode, const char *tlsReason) {
+  if (tlsCode != 0) {
+    snprintf(detail_, sizeof(detail_), "%s (%s; tls %d: %s)", message,
+             HTTPClient::errorToString(httpCode).c_str(), tlsCode, tlsReason);
+  } else {
+    snprintf(detail_, sizeof(detail_), "%s (%s)", message, HTTPClient::errorToString(httpCode).c_str());
+  }
+  error_ = detail_;
+}
+
 bool SIoTClient::loadCredentials(uint8_t *secret) {
   Preferences store;
   /* Read-write even to read: a read-only open of a namespace that has never
@@ -573,15 +591,19 @@ SIoTStatus SIoTClient::post(const char *body) {
   http.addHeader("Content-Type", "application/json");
 
   const int code = http.POST((uint8_t *)body, strlen(body));
-  http.end();
 
   if (code <= 0) {
     /* Negative codes are HTTPClient's own: no route, TLS refused, timed out.
        Every one of them is "try again later" rather than "this record is
        wrong", and the two must not be conflated. */
-    fail("could not reach the server");
+    /* Read before end(): ending the request tears down the TLS state the reason lives in. */
+    char tlsReason[80] = "";
+    const int tlsCode = tls.lastError(tlsReason, sizeof(tlsReason));
+    failNetwork("could not reach the server", code, tlsCode, tlsReason);
+    http.end();
     return SIoTStatus::NetworkFailure;
   }
+  http.end();
 
   switch (code) {
     case 201:
