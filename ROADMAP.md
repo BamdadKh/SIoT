@@ -1279,17 +1279,27 @@ its own phase, not an item folded in here.
 > is firmware work (`firmware/SIoT/`), out of scope for a backend-only pass the same way 11.1's
 > key derivation is.
 
-- [ ] `SIoT` library: poll `GET /devices/:id/commands` (public, unauthenticated by session, same
-      shape as `GET /devices/:id/grants` — the device holds no session either)
-- [ ] Decrypt each with `device_command_key`; discard anything that fails to open — a stranger
+- [x] `SIoT` library: poll `GET /devices/:id/commands` (public, unauthenticated by session, same
+      shape as `GET /devices/:id/grants` — the device holds no session either) `SIoTClient::pollCommands(handler)` in `firmware/SIoT/`. Compiles for esp32 and is **not yet run on a board or against a server**
+- [x] Decrypt each with `device_command_key`; discard anything that fails to open — a stranger
       polling this endpoint can't produce a valid one, so a failure here means corruption, not
-      an attack worth alarming on
-- [ ] Compare the decrypted `command_seq` against a persisted high-water mark (new NVS value,
+      an attack worth alarming on (AAD and plaintext layout match `frontend/lib/crypto/command.js`; anything that does not open is skipped and acked)
+- [x] Compare the decrypted `command_seq` against a persisted high-water mark (new NVS value,
       alongside `boot_epoch`, in the `siot` partition for the same reason that one is); skip
       anything at or below it, and persist the new mark **before** running a side effect the
-      sketch's own action can't otherwise make safe to repeat
+      sketch's own action can't otherwise make safe to repeat (NVS key `cmdseq` in the `siot` partition; committed and read back before the handler runs)
 - [ ] Test: a re-delivered ciphertext (ack never landed) is skipped the second time; a tampered
       ciphertext (flipped bit) is discarded, not executed
+
+> The device half exists as code but is unverified end to end. A hardware test would be: queue a
+> command from a script using `encryptCommand`, run `pollCommands`, confirm the handler fires once,
+> reboot, re-queue the same ciphertext, and confirm it is skipped. That is the unticked test above.
+> Deviations worth knowing: the device acks the highest cursor it *saw*, including commands that
+> would not open or were at or below the mark (they are consumed either way, and leaving them
+> queued would redeliver them forever); the JSON is scanned for `"cursor"`, `"nonce"` and
+> `"ciphertext"` by key rather than parsed, which depends on the server emitting them as flat
+> strings; and the three working buffers are heap-allocated because ~3.7 KB on the 8 KB loop
+> task stack alongside TLS state was too tight to trust.
 
 ### 11.4 Acknowledgement and pruning
 

@@ -118,6 +118,30 @@ enum class SIoTStatus : uint8_t {
 /** For logging. Returns a static string; never null. */
 const char *SIoTStatusName(SIoTStatus status);
 
+/**
+ * One decrypted command, valid only inside the handler. The arguments are read
+ * by name; each getter returns false if the argument is missing or the wrong type.
+ */
+class SIoTCommand {
+ public:
+  uint64_t seq() const { return seq_; }
+  const char *type() const { return type_; }
+  bool getInt(const char *name, long long *out) const;
+  bool getBool(const char *name, bool *out) const;
+  bool getDouble(const char *name, double *out) const;
+  bool getText(const char *name, char *out, size_t capacity) const;
+
+ private:
+  friend class SIoTClient;
+  uint64_t seq_ = 0;
+  char type_[33] = "";
+  const uint8_t *args_ = nullptr;
+  size_t argsLen_ = 0;
+};
+
+/** Called once per new command. Keep it short; the radio is on. */
+typedef void (*SIoTCommandHandler)(const SIoTCommand &command);
+
 class SIoTClient {
  public:
   SIoTClient();
@@ -220,6 +244,18 @@ class SIoTClient {
   SIoTStatus buildNotification(SIoTSeverity severity, const char *message, char *out,
                                size_t capacity, size_t *written = nullptr);
 
+  /**
+   * Fetches queued commands, runs each new one through `handler`, then acks
+   * (roadmap 11.3, 11.4).
+   *
+   * Delivery is at-least-once. A command at or below the persisted
+   * `command_seq` mark is skipped, and the mark is committed to flash **before**
+   * the handler runs, so a crash mid-action loses that command rather than
+   * repeating it. Prefer commands that are idempotent by construction ("set
+   * target to X") over ones that are not ("toggle").
+   */
+  SIoTStatus pollCommands(SIoTCommandHandler handler);
+
   /** True once a 404 has latched. Cleared only by a reboot or `begin()` again. */
   bool isDeleted() const { return deleted_; }
 
@@ -253,6 +289,9 @@ class SIoTClient {
   void buildNonce(uint8_t *nonce, uint64_t seq) const;
   SIoTStatus sealAndSerialise(uint8_t *payload, size_t payloadLen, const uint8_t *key,
                               uint64_t seq, char *out, size_t capacity, size_t *written);
+  bool openCommand(const uint8_t *nonce, const uint8_t *sealed, size_t sealedLen, uint8_t *plain,
+                   uint64_t *seq, SIoTCommand *command);
+  bool commitCommandSeq(uint64_t seq);
   SIoTStatus post(const char *body);
   void fail(const char *message);
   void failNetwork(const char *message, int httpCode, int tlsCode, const char *tlsReason);
