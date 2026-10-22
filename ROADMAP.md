@@ -1058,7 +1058,16 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 
 ### 7.4 Layout
 - [ ] Drag-and-drop layout library integration (e.g. `react-grid-layout`)
-- [ ] Persist layout as part of vault data (encrypted)
+> Deliberately not built. The dashboard is one 560px column on a device's own page (7.3), so
+> a two-dimensional grid has nowhere to put a second column, and a dependency that size buys
+> nothing a list order does not. Worth revisiting only if a cross-device dashboard is built,
+> which is where a grid would have room to mean something.
+- [x] Persist layout as part of vault data (encrypted)
+      **The layout is the schema's field order**, already sealed in the vault on the device
+      entry, so there is no second layout document to keep in step with the fields it
+      arranges. Fields rows have Up and Down beside Remove (offered only where there is
+      somewhere to move to); saving is the same vault write as any other field change.
+      Clicked through against fixed props, not saved against a server
 
 > Phase 7 has no backend-only slice: a schema is just vault contents (`PUT`/`GET /vault`,
 > already done in Phase 3), and validation/rendering are entirely `frontend/app/` concerns.

@@ -81,6 +81,21 @@ export function DeviceFields({ username, entry, observed, reload }) {
     );
   }
 
+  /**
+   * The order fields are listed in is the order Readings and the dashboard use,
+   * so this is the whole of the layout (roadmap 7.4): it travels in the sealed
+   * schema like everything else here, and there is no second document to keep in
+   * step with it.
+   */
+  function moveRow(rowId, by) {
+    const from = rows.findIndex((row) => row.rowId === rowId);
+    const to = from + by;
+    if (from < 0 || to < 0 || to >= rows.length) return;
+    const next = [...rows];
+    [next[from], next[to]] = [next[to], next[from]];
+    edit(next);
+  }
+
   function describeObserved() {
     const room = SCHEMA_MAX_FIELDS - rows.length;
     edit([
@@ -131,7 +146,7 @@ export function DeviceFields({ username, entry, observed, reload }) {
       <p className="prose section-lede">
         What each reading is: what to call it, its unit, and how to show it. Stored in your vault
         beside this device&rsquo;s secret, so the server cannot tell a thermometer from a door
-        sensor. Once the device sends a declared field, the dashboard above draws it.
+        sensor. Once the device sends a declared field, the dashboard above draws it, in the order listed here.
       </p>
 
       <form className="stack stack-4" onSubmit={handleSubmit}>
@@ -141,11 +156,13 @@ export function DeviceFields({ username, entry, observed, reload }) {
           </p>
         ) : (
           <ol className="record-list">
-            {rows.map((row) => (
+            {rows.map((row, index) => (
               <FieldRow
                 key={row.rowId}
                 row={row}
                 disabled={busy}
+                onMoveUp={index > 0 ? () => moveRow(row.rowId, -1) : null}
+                onMoveDown={index < rows.length - 1 ? () => moveRow(row.rowId, 1) : null}
                 onChange={(patch) => updateRow(row.rowId, patch)}
                 onRemove={() => edit(rows.filter((other) => other.rowId !== row.rowId))}
               />
@@ -207,7 +224,7 @@ export function DeviceFields({ username, entry, observed, reload }) {
  * because a field is *about* that key. Only a field added by name has an input
  * for it, since there is nothing yet for it to be about.
  */
-function FieldRow({ row, disabled, onChange, onRemove }) {
+function FieldRow({ row, disabled, onMoveUp, onMoveDown, onChange, onRemove }) {
   return (
     <li className="record">
       <div className="record-head">
@@ -216,9 +233,23 @@ function FieldRow({ row, disabled, onChange, onRemove }) {
         ) : (
           <span className="mono schema-key">{row.key}</span>
         )}
-        <button className="button button-link" type="button" onClick={onRemove} disabled={disabled}>
-          Remove
-        </button>
+        {/* Moves are offered only where there is somewhere to move to, rather
+            than as a faint control that does nothing at the ends. */}
+        <span className="row row-links">
+          {onMoveUp ? (
+            <button className="button button-link" type="button" onClick={onMoveUp} disabled={disabled} aria-label={`Move ${row.key || 'this field'} up`}>
+              Up
+            </button>
+          ) : null}
+          {onMoveDown ? (
+            <button className="button button-link" type="button" onClick={onMoveDown} disabled={disabled} aria-label={`Move ${row.key || 'this field'} down`}>
+              Down
+            </button>
+          ) : null}
+          <button className="button button-link" type="button" onClick={onRemove} disabled={disabled}>
+            Remove
+          </button>
+        </span>
       </div>
 
       <div className="schema-grid">
