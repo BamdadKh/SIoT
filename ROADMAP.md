@@ -999,10 +999,10 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 ## Phase 8 — Inter-Device Grants
 
 ### 8.1 Grant creation — client
-- [ ] UI: pick Device A (granted) and Device B (source), with an explicit warning that this grants access to B's full history, past and future, and that revocation only affects future data
-- [ ] Decrypt `device_B_data_key` from vault
-- [ ] Re-encrypt it under `device_A_data_key` with AAD `"grant/v1" || DEVICE_ID_A || DEVICE_ID_B`
-- [ ] Upload grant blob
+- [ ] UI: pick Device A (granted) and Device B (source), with an explicit warning that this grants access to B's full history, past and future, and that revocation only affects future data. > Not built: new UI is Opus-only (CLAUDE.md rule 6)
+- [x] Decrypt `device_B_data_key` from vault: `deriveDeviceDataKey(deviceSecretBytes(entry))`, both already existing; no new code needed
+- [x] Re-encrypt it under `device_A_data_key` with AAD `"grant/v1" || DEVICE_ID_A || DEVICE_ID_B`: `createGrant` / `openGrant` in `frontend/lib/crypto/grant.js`, 60-byte `iv || ct || tag` blob matching the server's `GRANT_BLOB_BYTES`. 6 tests: round trip, fresh IV, wrong key / pair / swapped roles all refuse, tamper refuses. The suite is 189
+- [x] Upload grant blob: `createGrantRecord` in `app/src/lib/api.js` (`POST /grants`). Nothing calls it until the UI exists
 
 ### 8.2 Grant storage — server
 - [x] `grants` table: id, device_a_id, device_b_id, ciphertext, created_at — migration `1785650000000_grants.js`. Deliberately **no** uniqueness constraint on `(device_a_id, device_b_id)`: design 9.3 says old data must stay readable by A forever, which depends on A being able to fetch the grant that wrapped the *old* `device_B_data_key` after B rotates; upserting on re-grant would destroy that row. Multiple grants per pair, one per key epoch, newest first

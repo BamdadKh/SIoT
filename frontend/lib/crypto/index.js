@@ -37,6 +37,7 @@ export {
   DEVICE_SECRET_BYTES,
 } from './device.js';
 export { encodeCbor, decodeCbor } from './cbor.js';
+export { createGrant, openGrant, grantAad, GRANT_BLOB_BYTES } from './grant.js';
 export {
   composeSeq,
   seqToBytes,

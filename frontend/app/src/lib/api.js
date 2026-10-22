@@ -138,6 +138,16 @@ export function registerDevice(body) {
 }
 
 /**
+ * Uploads a read-only key grant (roadmap 8.1). `ciphertext` is the 60-byte blob
+ * from `createGrant`; the server stores it without being able to open it.
+ *
+ * @param {{ device_a_id: string, device_b_id: string, ciphertext: string }} body
+ */
+export function createGrantRecord(body) {
+  return request('POST', '/grants', body);
+}
+
+/**
  * The metadata the server legitimately holds per device. No names: it has none.
  *
  * @returns {Promise<{ devices: Array<{ device_id: string, last_seq: string, last_seen_at: string|null }> }>}
