@@ -968,15 +968,60 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 ## Phase 7 — Dashboard & Schemas
 
 ### 7.1 Schema definition
-- [ ] Define schema JSON shape (field name, type, widget hint) for a device
-- [ ] Client: form/UI for a device owner to declare a schema at pairing time
-- [ ] Store schema encrypted in vault alongside device secret
+- [x] Define schema JSON shape (field name, type, widget hint) for a device
+      `{ v: 1, fields: [{ key, label?, type, unit?, widget, min?, max? }] }` in
+      `frontend/lib/crypto/device-schema.js`. Types are `number`, `boolean`, `text`; widgets
+      per type are `value`/`graph`/`gauge`, `value`/`toggle`, and `value`. A gauge must carry a
+      finite `min < max`. A key is at most 24 characters, matching the firmware's
+      `SIOT_READING_NAME_MAX`, since a longer one describes a reading that can never arrive
+- [x] Client: form/UI for a device owner to declare a schema at pairing time
+      **Deviated: declared on the device page, not during Add device.** Pairing is the one
+      moment nothing can be checked: the sketch has not run, so every key is typed from memory,
+      and a key off by a character is a field that silently never fills. The Fields section on
+      `DeviceDetail` (`components/DeviceFields.jsx`) starts from the keys the device has actually
+      sent ("Describe them") and still lets a key it has not sent yet be added by name, which is
+      also what an unregistered device gets. Adding the same form to `AddDevice` later is cheap
+      if the pairing-time moment turns out to matter
+- [x] Store schema encrypted in vault alongside device secret
+      As `schema` on the device's vault entry, absent when there is none. `setDeviceSchema` is an
+      ordinary vault write like a rename, re-reading the vault first, and like a rename it
+      touches nothing else on the entry, so it survives re-provisioning
+
+> Declared fields already change the Readings section, ahead of 7.3: a field's label replaces
+> its key (the key stays on hover), its unit follows the value, declared fields come first in
+> the order the schema lists them, and a value that is not its declared type is shown as what it
+> is with "Declared as a number" beneath it rather than hidden or coerced. Widget hints are
+> stored and not yet drawn; the section says so.
 
 ### 7.2 Schema validation (untrusted input)
-- [ ] Write strict allowlist validator for schema field types before ever rendering
-- [ ] Reject/sanitize anything outside the allowlist
-- [ ] Confirm no path renders raw HTML or uses `dangerouslySetInnerHTML` from schema data
-- [ ] Test with a deliberately malicious schema payload (script tags, unexpected types) — confirm it's inert
+- [x] Write strict allowlist validator for schema field types before ever rendering
+      Two entry points: `normaliseSchema` on read (tolerant per field, dropped fields counted and
+      surfaced on Devices, the same rule `normaliseVaultDocument` applies to entries) and
+      `buildSchema` on write (strict, names the field and the reason). `setDeviceSchema`
+      validates again at the last point before sealing, so a caller that skips the form's check
+      still cannot write something a reader would discard
+- [x] Reject/sanitize anything outside the allowlist
+      Unknown properties are never carried through, so no later renderer can trust a field
+      because it "was in the schema". Labels and units are cleaned of invisibles and bidi
+      overrides (`display-text.js`, now shared with device names). A key is refused rather than
+      cleaned, because a rewritten key no longer matches what the device sends. A schema with a
+      `v` this client does not know reads as none rather than being guessed at as v1. A broken
+      schema costs its fields, never the device entry holding it
+- [x] Confirm no path renders raw HTML or uses `dangerouslySetInnerHTML` from schema data
+      Nothing in `frontend/app/src` uses `dangerouslySetInnerHTML` or `innerHTML` at all. Every
+      schema string reaches the DOM as a React text child or a `title`, and widget names are
+      looked up in fixed tables rather than used as class names or component names
+- [x] Test with a deliberately malicious schema payload (script tags, unexpected types) — confirm it's inert
+      `test/device-schema.test.js`, 14 cases: markup in keys and labels survives only as text,
+      `dangerouslySetInnerHTML`/`onclick`/`style` properties are stripped, `__proto__`,
+      `constructor`, `toString` and object-valued types are refused, prototype pollution is
+      checked for, and every value left standing is a string or a number
+
+> **Walked against fixed props, not a live vault.** A throwaway page (since deleted) rendered
+> Readings and Fields with a stored schema and a mismatched value, and the describe, add-by-name
+> and refuse-to-save paths were clicked through in the browser; that pass caught a crash in the
+> form's change detection. The save itself (re-read, `PUT /vault`, reload) is the same shape as
+> rename and has not been run against a server from this screen: Docker was not running.
 
 ### 7.3 Widget rendering
 - [ ] Build `Graph` widget (time series from decrypted records)

@@ -1,5 +1,11 @@
-import { useEffect, useState } from 'react';
-import { findDevice, removeDevice, renameDevice, DEVICE_NAME_MAX_LENGTH } from '@siot/crypto';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  findDevice,
+  observedReadings,
+  removeDevice,
+  renameDevice,
+  DEVICE_NAME_MAX_LENGTH,
+} from '@siot/crypto';
 import { ApiError, deleteDevice } from '../lib/api.js';
 import { loadVault, storeVault, VaultRollbackError } from '../lib/vault-store.js';
 import { useVaultDevices } from '../lib/use-vault-devices.js';
@@ -13,7 +19,9 @@ import { RollbackWarning } from '../components/RollbackWarning.jsx';
 import { OrphanNote, UnregisteredNote } from '../components/DeviceStateNote.jsx';
 import { RevealCredentials } from '../components/RevealCredentials.jsx';
 import { EraseBoard } from '../components/EraseBoard.jsx';
-import { DeviceReadings } from '../components/DeviceReadings.jsx';
+import { DeviceReadings, readRecord } from '../components/DeviceReadings.jsx';
+import { DeviceFields } from '../components/DeviceFields.jsx';
+import { useDeviceRecords } from '../lib/use-device-records.js';
 import { EXPORT_SECTION_ID, ExportRecords } from '../components/ExportRecords.jsx';
 
 /**
@@ -140,10 +148,13 @@ function Found({ username, deviceId, state, reload, onDeleted }) {
           and an empty readings section beneath it would be a second, vaguer
           way of saying the same thing. */}
       {device.state === PAIRED && entry ? (
-        <>
-          <DeviceReadings entry={entry} />
-          <ExportRecords entry={entry} />
-        </>
+        <PairedSections username={username} entry={entry} reload={reload} />
+      ) : null}
+
+      {/* An unregistered device has sent nothing anyone can see, but its fields
+          can still be declared ahead of the first record, by name. */}
+      {device.state === UNREGISTERED && entry ? (
+        <DeviceFields username={username} entry={entry} observed={NOTHING_OBSERVED} reload={reload} />
       ) : null}
 
       {/* An orphan has no vault entry, so there is no name to change, nothing to
@@ -162,6 +173,37 @@ function Found({ username, deviceId, state, reload, onDeleted }) {
         reload={reload}
         onDeleted={onDeleted}
       />
+    </>
+  );
+}
+
+const NOTHING_OBSERVED = [];
+
+/**
+ * Readings, the fields that say what they mean, and the download, for a device
+ * both halves know about.
+ *
+ * The records are fetched once here rather than inside `DeviceReadings`,
+ * because the fields form needs them too: it starts from the keys the device
+ * has actually sent rather than asking for them to be typed from memory.
+ */
+function PairedSections({ username, entry, reload }) {
+  const [records, , loadOlder] = useDeviceRecords(entry);
+
+  const observed = useMemo(() => {
+    if (records.status !== 'ok') return NOTHING_OBSERVED;
+    // Newest first, so a key the sketch renamed is offered under its current
+    // name before the old one.
+    return observedReadings(
+      records.records.toReversed().map((record) => readRecord(record).readings),
+    );
+  }, [records]);
+
+  return (
+    <>
+      <DeviceReadings state={records} onLoadOlder={loadOlder} schema={entry.schema ?? null} />
+      <DeviceFields username={username} entry={entry} observed={observed} reload={reload} />
+      <ExportRecords entry={entry} />
     </>
   );
 }

@@ -736,7 +736,17 @@ a reading named `__proto__`. **5.6's last hop is still open**: `WiFiClientSecure
 certificate pin need a WiFi network to point at, and the example sketch (which compiles
 against the current library) needs the SSID and password filled in.
 
-The frontend suite is 166 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
+**Phase 7.1 and 7.2 are done: devices have declared fields, behind an allowlist.**
+`lib/crypto/device-schema.js` is the schema shape and the only way to read one (`normaliseSchema`,
+tolerant per field) or write one (`buildSchema`, strict); it rides on the vault entry as `schema`.
+`components/DeviceFields.jsx` is a Fields section on `DeviceDetail`, between Readings and
+Download, and **not in Add device**, deliberately: at pairing time every key is typed from memory,
+while here the form starts from the keys the device actually sent. Readings now use a field's
+label, unit and order, and show a value of the wrong declared type as what it is. Widget hints
+are stored and not drawn; that is 7.3. Records are fetched once in `PairedSections` and shared
+by Readings and Fields. Not yet saved against a live server from this screen.
+
+The frontend suite is 180 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
 `sequence.js`, `records.js`, `provisioning-protocol.js` and `cbor.js` are React-free so the
 suite reaches them directly, and `protocol-vectors.test.js` re-derives every published vector
 from scratch.

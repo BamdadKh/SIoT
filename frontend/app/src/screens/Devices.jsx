@@ -66,6 +66,16 @@ export function Devices({ username, onSignOut, signingOut }) {
             </p>
           ) : null}
 
+          {state.status === 'ok' && state.schemaFieldsDropped > 0 ? (
+            <p className="alarm" role="alert">
+              {state.schemaFieldsDropped} declared{' '}
+              {state.schemaFieldsDropped === 1 ? 'field' : 'fields'} in your vault could not be read
+              and {state.schemaFieldsDropped === 1 ? 'was' : 'were'} skipped. The devices they
+              belong to are unaffected; their readings show under the names the device sends until
+              the fields are declared again.
+            </p>
+          ) : null}
+
           {state.status === 'ok' && state.devices.length === 0 ? (
             <section className="slot">
               <span className="tick tick-tl" />

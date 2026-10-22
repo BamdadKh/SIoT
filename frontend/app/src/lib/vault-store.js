@@ -47,7 +47,8 @@ export class VaultRollbackError extends Error {
  *
  * @param {string} username keys the high-water mark, so switching accounts on
  *        one browser is not mistaken for a rollback of the account it replaced.
- * @returns {Promise<{ version: number, document: object, dropped: number }>}
+ * @returns {Promise<{ version: number, document: object, dropped: number,
+ *            schemaFieldsDropped: number }>}
  */
 export async function loadVault(username) {
   const vaultKey = getVaultKey();
@@ -65,9 +66,9 @@ export async function loadVault(username) {
   const contents =
     ciphertext === null ? null : await decryptVault(fromBase64Url(ciphertext), vaultKey, version);
 
-  const { document, dropped } = normaliseVaultDocument(contents);
+  const { document, dropped, schemaFieldsDropped } = normaliseVaultDocument(contents);
   await setHighWaterMark(username, version);
-  return { version, document, dropped };
+  return { version, document, dropped, schemaFieldsDropped };
 }
 
 /**

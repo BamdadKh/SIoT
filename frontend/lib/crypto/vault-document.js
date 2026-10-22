@@ -32,6 +32,8 @@
 
 import { toBase64Url, fromBase64Url } from './encoding.js';
 import { DEVICE_ID_BYTES, DEVICE_SECRET_BYTES } from './device.js';
+import { cleanDisplayText } from './display-text.js';
+import { buildSchema, normaliseSchema } from './device-schema.js';
 
 /**
  * Bumped only for a change old clients cannot read. Additive fields do not need
@@ -52,12 +54,9 @@ export function emptyVaultDocument() {
 }
 
 /**
- * Strips what must never reach a rendered name.
+ * Strips what must never reach a rendered name (see `display-text.js`).
  *
- * React escapes markup, so this is not an XSS defence and should not be mistaken
- * for one. It is a *display integrity* one: control characters and the Unicode
- * bidi overrides can make a name render as something other than its own bytes,
- * and a device list is exactly where "this is the sensor you think it is" has to
+ * A device list is exactly where "this is the sensor you think it is" has to
  * hold. The vault is authenticated, so nothing hostile gets in here from the
  * server; a name is still typed by a person who may have pasted it from anywhere.
  *
@@ -69,13 +68,7 @@ export function normaliseDeviceName(name) {
     throw new TypeError('device name must be a string');
   }
 
-  // C0/C1 controls, the bidi embedding and isolate overrides, and the
-  // zero-width characters that make two different names look identical.
-  const cleaned = name
-    // eslint-disable-next-line no-control-regex -- stripping controls is the point
-    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const cleaned = cleanDisplayText(name);
 
   if (cleaned.length === 0) {
     throw new TypeError('device name cannot be empty');
@@ -112,8 +105,14 @@ function assertBase64UrlBytes(value, expectedBytes, label) {
  * not tampering, and one bad entry must not make the other devices unreachable.
  * It is not silent either: the dropped ids come back so a caller can say so.
  *
+ * A schema field that will not parse is dropped from its device rather than
+ * taking the device with it: the schema says how to show readings, the entry
+ * holds the only key that opens them, and losing the second over the first
+ * would be absurd. Counted separately for the same not-silent reason.
+ *
  * @param {unknown} contents
- * @returns {{ document: ReturnType<typeof emptyVaultDocument>, dropped: number }}
+ * @returns {{ document: ReturnType<typeof emptyVaultDocument>, dropped: number,
+ *             schemaFieldsDropped: number }}
  */
 export function normaliseVaultDocument(contents) {
   if (contents === null || contents === undefined) {
@@ -127,37 +126,45 @@ export function normaliseVaultDocument(contents) {
   const devices = [];
   const seen = new Set();
   let dropped = 0;
+  let schemaFieldsDropped = 0;
 
   for (const entry of raw) {
     try {
-      const device = normaliseDeviceEntry(entry);
+      const { device, schemaDropped } = normaliseDeviceEntry(entry);
       // `DEVICE_ID` is the key everywhere (design 5.5); two entries claiming one
       // is a bug that would otherwise silently shadow whichever came second.
       if (seen.has(device.id)) throw new Error('duplicate DEVICE_ID');
       seen.add(device.id);
       devices.push(device);
+      schemaFieldsDropped += schemaDropped;
     } catch {
       dropped += 1;
     }
   }
 
-  return { document: { v: VAULT_DOCUMENT_VERSION, devices }, dropped };
+  return { document: { v: VAULT_DOCUMENT_VERSION, devices }, dropped, schemaFieldsDropped };
 }
 
 /**
  * @param {unknown} entry
- * @returns {{ id: string, secret: string, name: string, added_at: string }}
+ * @returns {{ device: { id: string, secret: string, name: string, added_at: string,
+ *             schema?: object }, schemaDropped: number }}
  */
 function normaliseDeviceEntry(entry) {
   if (typeof entry !== 'object' || entry === null) {
     throw new TypeError('device entry must be an object');
   }
-  return {
+  const device = {
     id: assertBase64UrlBytes(entry.id, DEVICE_ID_BYTES, 'DEVICE_ID'),
     secret: assertBase64UrlBytes(entry.secret, DEVICE_SECRET_BYTES, 'DEVICE_SECRET'),
     name: normaliseDeviceName(entry.name),
     added_at: typeof entry.added_at === 'string' ? entry.added_at : new Date(0).toISOString(),
   };
+  // Absent rather than null when there is none, so an entry written before
+  // schemas existed reads back exactly as it was written.
+  const { schema, dropped } = normaliseSchema(entry.schema);
+  if (schema) device.schema = schema;
+  return { device, schemaDropped: dropped };
 }
 
 /**
@@ -235,6 +242,36 @@ export function renameDevice(doc, deviceId, name) {
     devices: listDevices(doc).map((device) =>
       device.id === deviceId ? { ...device, name: nextName } : device,
     ),
+  };
+}
+
+/**
+ * Declares, replaces or clears what a device's readings mean (roadmap 7.1). An
+ * ordinary vault write like a rename, and like a rename it touches nothing else
+ * on the entry, so it survives re-provisioning.
+ *
+ * Validated strictly here, at the last point before sealing, so a caller that
+ * skipped `buildSchema` still cannot write a schema a reader would discard.
+ *
+ * @param {{ devices: Array }} doc
+ * @param {string} deviceId base64url
+ * @param {unknown[]} fields
+ */
+export function setDeviceSchema(doc, deviceId, fields) {
+  if (!findDevice(doc, deviceId)) {
+    throw new Error('no such device in the vault');
+  }
+  const schema = buildSchema(fields);
+
+  return {
+    ...doc,
+    v: VAULT_DOCUMENT_VERSION,
+    devices: listDevices(doc).map((device) => {
+      if (device.id !== deviceId) return device;
+      // eslint-disable-next-line no-unused-vars -- dropping the old schema is the point
+      const { schema: _previous, ...rest } = device;
+      return schema ? { ...rest, schema } : rest;
+    }),
   };
 }
 

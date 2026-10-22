@@ -22,7 +22,8 @@ import { joinDevices } from './device-list.js';
  * @param {string} username
  * @returns {[
  *   { status: 'checking' }
- *   | { status: 'ok', version: number, document: object, dropped: number, devices: Array }
+ *   | { status: 'ok', version: number, document: object, dropped: number,
+ *       schemaFieldsDropped: number, devices: Array }
  *   | { status: 'rollback', serverVersion: number, cached: number }
  *   | { status: 'error', message: string },
  *   () => Promise<void>,
@@ -44,7 +45,7 @@ export function useVaultDevices(username) {
 
   const reload = useCallback(async () => {
     try {
-      const [{ version, document, dropped }, { devices: registered }] = await Promise.all([
+      const [{ version, document, dropped, schemaFieldsDropped }, { devices: registered }] = await Promise.all([
         loadVault(username),
         fetchDevices(),
       ]);
@@ -55,6 +56,7 @@ export function useVaultDevices(username) {
         version,
         document,
         dropped,
+        schemaFieldsDropped,
         devices: joinDevices(listDevices(document), registered),
       });
     } catch (err) {

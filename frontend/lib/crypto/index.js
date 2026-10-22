@@ -58,12 +58,29 @@ export {
   findDevice,
   addDevice,
   renameDevice,
+  setDeviceSchema,
   removeDevice,
   deviceSecretBytes,
   deviceIdBytes,
   VAULT_DOCUMENT_VERSION,
   DEVICE_NAME_MAX_LENGTH,
 } from './vault-document.js';
+export {
+  buildSchema,
+  normaliseSchema,
+  parseSchemaField,
+  findSchemaField,
+  valueMatchesField,
+  arrangeReadings,
+  observedReadings,
+  SCHEMA_VERSION,
+  SCHEMA_TYPES,
+  SCHEMA_WIDGETS,
+  SCHEMA_MAX_FIELDS,
+  SCHEMA_KEY_MAX_LENGTH,
+  SCHEMA_LABEL_MAX_LENGTH,
+  SCHEMA_UNIT_MAX_LENGTH,
+} from './device-schema.js';
 
 import { deriveMasterKey } from './argon2.js';
 import { deriveLoginKey, deriveKek } from './hkdf.js';

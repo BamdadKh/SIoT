@@ -1,4 +1,4 @@
-import { useDeviceRecords } from '../lib/use-device-records.js';
+import { arrangeReadings } from '@siot/crypto';
 import {
   describeDeviceTime,
   describeStepText,
@@ -16,11 +16,12 @@ import { describeSequence } from '../lib/sequence.js';
  * was opened here with a key derived from the `DEVICE_SECRET` in the vault. The
  * server has the same bytes and cannot do this.
  *
- * **This is not the dashboard.** Phase 7 is where a schema decides that
- * `temp_c` is a gauge in degrees and lays the widgets out; until there is one,
- * a reading is a key and a value and pretending otherwise would mean guessing
- * at units. So this renders what the payload carries, and says plainly when a
- * value is of a kind it does not understand.
+ * **This is not the dashboard.** Phase 7.3 is where a schema's widget hints
+ * become graphs and gauges. What a declared field changes here is only its
+ * label, its unit and its place in the row (`arrangeReadings`); a reading no
+ * field describes is still a key and a value, since anything more would mean
+ * guessing at units. A value of a kind this does not understand is said so
+ * plainly.
  *
  * Readings keep the order they arrive in on the wire, which is not necessarily
  * the order a sketch called `addReading` in: nothing verifies a payload's
@@ -34,8 +35,7 @@ import { describeSequence } from '../lib/sequence.js';
  * time is the server's and is only as trustworthy as the server. `seq` is the
  * sole authoritative order (design 7.1), so it is what the list is sorted by.
  */
-export function DeviceReadings({ entry }) {
-  const [state, , loadOlder] = useDeviceRecords(entry);
+export function DeviceReadings({ state, onLoadOlder, schema }) {
 
   return (
     <section className="device-section">
@@ -58,13 +58,15 @@ export function DeviceReadings({ entry }) {
         </p>
       ) : null}
 
-      {state.status === 'ok' ? <Opened state={state} onLoadOlder={loadOlder} /> : null}
+      {state.status === 'ok' ? (
+        <Opened state={state} onLoadOlder={onLoadOlder} schema={schema} />
+      ) : null}
     </section>
   );
 }
 
 /** The records themselves, newest first, with what sits between them. */
-function Opened({ state, onLoadOlder }) {
+function Opened({ state, onLoadOlder, schema }) {
   const { records } = state;
 
   if (records.length === 0) {
@@ -102,6 +104,7 @@ function Opened({ state, onLoadOlder }) {
         record={opened[index].record}
         read={opened[index].read}
         showDeviceTime={!clockless}
+        schema={schema}
       />,
     );
     const step = steps.get(index);
@@ -181,7 +184,7 @@ function Opened({ state, onLoadOlder }) {
  * the payload said, and the ways a payload can disappoint are stated rather than
  * rendered around.
  */
-function Record({ record, read: parsed, showDeviceTime }) {
+function Record({ record, read: parsed, showDeviceTime, schema }) {
   if (record.error) {
     return (
       <li className="record record-refused">
@@ -209,10 +212,18 @@ function Record({ record, read: parsed, showDeviceTime }) {
         <p className="record-problem">{parsed.problem}</p>
       ) : (
         <dl className="record-readings">
-          {parsed.readings.map(({ key, value }) => (
+          {arrangeReadings(schema, parsed.readings).map(({ key, value, field, mismatch }) => (
             <div className="record-reading" key={key}>
-              <dt>{key}</dt>
-              <dd className="mono">{formatReading(value)}</dd>
+              {/* A label replaces the key on screen and the key stays on hover:
+                  it is still what the device sent and what the export holds. */}
+              <dt title={field?.label ? key : undefined}>{field?.label ?? key}</dt>
+              <dd className="mono">
+                {formatReading(value)}
+                {field?.unit && !mismatch ? <span className="record-unit"> {field.unit}</span> : null}
+              </dd>
+              {mismatch ? (
+                <dd className="record-mismatch">Declared as {TYPE_NAMES[field.type]}</dd>
+              ) : null}
             </div>
           ))}
         </dl>
@@ -235,8 +246,11 @@ function Record({ record, read: parsed, showDeviceTime }) {
   );
 }
 
+/** How a declared type reads in a sentence. */
+const TYPE_NAMES = { number: 'a number', boolean: 'on or off', text: 'text' };
+
 /** @param {{ payload: unknown, error: string|null }} record */
-function readRecord(record) {
+export function readRecord(record) {
   if (record.error) return { deviceTime: null, readings: [], unsupported: [], problem: null };
   return readPayload(record.payload);
 }

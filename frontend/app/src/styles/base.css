@@ -992,6 +992,50 @@ a:hover {
   color: var(--ink-muted);
 }
 
+/* A reading's unit sits after its value in the body face rather than the
+   value's mono: the number is the machine's, the unit is a word the owner chose. */
+.record-unit {
+  font-family: var(--font-sans);
+  color: var(--ink-muted);
+}
+
+/* A value that is not the type its field declares. Shown as what it is, with
+   the declaration it broke beneath it, in the rust `.record-problem` uses: the
+   client is saying it cannot read this the way it was told to. */
+.record-mismatch {
+  margin: 2px 0 0;
+  font-size: var(--size-label);
+  color: var(--rust-deep);
+}
+
+/* --- declared fields (roadmap 7.1) --------------------------------------- */
+
+/*
+ * Each field is a `.record` row in a `.record-list`, the same register the
+ * readings above it use, so the page reads as one design: what the device said,
+ * then what it means. The key heads the row in ink rather than muted, because it
+ * is the device's own string and the row is about it.
+ */
+.schema-key {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* The same column rule as `.record-readings`, so a field's controls line up the
+   way a record's values do. */
+.schema-grid {
+  margin-top: var(--sp-3);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--sp-4);
+}
+
+/* A select takes the input's box and keeps the platform's own arrow: drawing
+   one would mean a colour baked into an image, outside the tokens. */
+.field-select {
+  padding-right: var(--sp-2);
+}
+
 /* --- layout helpers ------------------------------------------------------ */
 
 .stack {
