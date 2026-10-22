@@ -1266,7 +1266,7 @@ surprise discovered by someone building it.
 - [x] `siot.notify(severity, message)` in the ESP32 library, encrypting under `device_notify_key` and signing with the same Ed25519 key ordinary records use (`SIoTClient::notify` and `buildNotification` in `firmware/SIoT/`; severity is `SIoTSeverity`. Compiles for esp32, **not yet run on a board**)
 - [x] Notifications and readings share one `seq` sequence, not two — `seq` feeds the nonce (design 7.2), and two counters over one key is nonce reuse waiting to happen. This is the single most dangerous thing to get wrong in this phase (both call one `sealAndSerialise` with `seq` allocated from the single `msgCounter_`, so the nonce, AAD and signature are one code path; the only differences are the payload and the key)
 - [x] Bound the message length in the library, not just in the UI: a device that can emit an arbitrarily long ciphertext lets its own payload size leak what it is saying (JS library and firmware both enforce 120 bytes; the firmware refuses with `PayloadTooLarge` before it consumes a `seq`. Bounding is not padding: a fixed-size payload is a separate decision)
-- [ ] Test: a notification and a reading uploaded from one boot are accepted, in order, with no `seq` collision
+- [x] Test: a notification and a reading uploaded from one boot are accepted, in order, with no `seq` collision Verified on a real ESP32 against a local server: a reading, a notification and a second reading from one boot landed at consecutive `seq` values (msg_counter 0, 1, 2), and the browser-side `openAnyRecord` opened them as reading, notification ("Door left open", alert) and reading
 
 ### 10.3 Reading — client side
 
@@ -1427,8 +1427,8 @@ its own phase, not an item folded in here.
       alongside `boot_epoch`, in the `siot` partition for the same reason that one is); skip
       anything at or below it, and persist the new mark **before** running a side effect the
       sketch's own action can't otherwise make safe to repeat (NVS key `cmdseq` in the `siot` partition; committed and read back before the handler runs)
-- [ ] Test: a re-delivered ciphertext (ack never landed) is skipped the second time; a tampered
-      ciphertext (flipped bit) is discarded, not executed
+- [x] Test: a re-delivered ciphertext (ack never landed) is skipped the second time; a tampered
+      ciphertext (flipped bit) is discarded, not executed Verified on a real ESP32: commands 1 to 4 each ran once; a freshly encrypted replay of an already-run `command_seq` was skipped, before and after a reboot (the mark survived in NVS); the acked queue was pruned to empty. **A tampered ciphertext was not tested on hardware**, only the replay half; the tamper half is covered by `test/command.test.js` on the JS side
 
 > The device half exists as code but is unverified end to end. A hardware test would be: queue a
 > command from a script using `encryptCommand`, run `pollCommands`, confirm the handler fires once,
