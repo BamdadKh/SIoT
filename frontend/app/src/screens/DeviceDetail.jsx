@@ -19,6 +19,7 @@ import { RollbackWarning } from '../components/RollbackWarning.jsx';
 import { OrphanNote, UnregisteredNote } from '../components/DeviceStateNote.jsx';
 import { RevealCredentials } from '../components/RevealCredentials.jsx';
 import { EraseBoard } from '../components/EraseBoard.jsx';
+import { DeviceDashboard } from '../components/DeviceDashboard.jsx';
 import { DeviceReadings, readRecord } from '../components/DeviceReadings.jsx';
 import { DeviceFields } from '../components/DeviceFields.jsx';
 import { useDeviceRecords } from '../lib/use-device-records.js';
@@ -201,6 +202,7 @@ function PairedSections({ username, entry, reload }) {
 
   return (
     <>
+      <DeviceDashboard state={records} schema={entry.schema ?? null} />
       <DeviceReadings state={records} onLoadOlder={loadOlder} schema={entry.schema ?? null} />
       <DeviceFields username={username} entry={entry} observed={observed} reload={reload} />
       <ExportRecords entry={entry} />

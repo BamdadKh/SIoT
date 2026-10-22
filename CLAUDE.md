@@ -746,7 +746,13 @@ label, unit and order, and show a value of the wrong declared type as what it is
 are stored and not drawn; that is 7.3. Records are fetched once in `PairedSections` and shared
 by Readings and Fields. Not yet saved against a live server from this screen.
 
-The frontend suite is 180 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
+**Phase 7.3 is done: declared fields are drawn.** `components/DeviceDashboard.jsx` is a
+Dashboard section at the top of `DeviceDetail`'s paired sections, with `lib/dashboard.js` deciding
+what each panel may claim. Graphs are spaced by record rather than by time and break at gaps,
+restarts and unopenable records; gauges say when a value is off the dial; a toggle shows state and
+cannot be pressed until 11.5. Every value is "the newest this browser has seen", dated by arrival.
+
+The frontend suite is 196 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
 `sequence.js`, `records.js`, `provisioning-protocol.js` and `cbor.js` are React-free so the
 suite reaches them directly, and `protocol-vectors.test.js` re-derives every published vector
 from scratch.

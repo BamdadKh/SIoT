@@ -1036,6 +1036,190 @@ a:hover {
   padding-right: var(--sp-2);
 }
 
+/* --- dashboard (roadmap 7.3) --------------------------------------------- */
+
+/*
+ * One `.record` row per declared field, in the same register as Readings and
+ * Fields. The data ink is `--ink`, not an accent: olive would say the graph can
+ * be pressed, and rust is the mark and the things the client cannot open. A
+ * drawn reading is neither.
+ */
+.dash-label {
+  color: var(--ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.dash-body {
+  margin-top: var(--sp-3);
+}
+
+/* The newest value is the panel's headline, so it takes the value face at a
+   size someone can read across the room, not the 10px set for identifiers. */
+.dash-value {
+  margin: 0;
+  font-size: var(--size-h3);
+  line-height: 1.2;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.dash-value .record-unit {
+  font-size: var(--size-body);
+}
+
+.dash-absent {
+  margin: 0;
+  font-size: var(--size-small);
+  color: var(--ink-faint);
+}
+
+.dash-graph {
+  margin: 0;
+}
+
+/* The scale sits beside the plot in HTML rather than inside the SVG, because
+   the SVG stretches to the column and text drawn in it would stretch with it. */
+.dash-graph-plot {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.dash-graph-scale {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: var(--size-label);
+  text-align: right;
+  flex: 0 0 auto;
+}
+
+.dash-graph-svg {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 120px;
+  background: var(--surface-input);
+}
+
+/* Two rules, top and bottom of the range, and no gridlines between: the same
+   fractional-pixel problem `--grid-step` describes, avoided the same way. */
+.dash-graph-rule {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Where the line had to stop. Dashed and in the rule colour: it marks an
+   absence, so it must not read as a value. */
+.dash-graph-break {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.dash-graph-line {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.dash-graph-axis {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 var(--sp-4);
+  margin-top: var(--sp-2);
+  color: var(--ink-faint);
+}
+
+.dash-graph-axis span {
+  white-space: nowrap;
+}
+
+.dash-gauge {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+}
+
+.dash-gauge-dial {
+  margin: 0;
+  /* A width rather than a flex basis: on a phone the row becomes a column, and
+     a basis would turn into the dial's height. */
+  flex: none;
+  width: 140px;
+}
+
+.dash-gauge-dial svg {
+  display: block;
+  width: 100%;
+}
+
+.dash-gauge-track,
+.dash-gauge-fill {
+  fill: none;
+  stroke-width: 7;
+}
+
+.dash-gauge-track {
+  stroke: var(--line);
+}
+
+.dash-gauge-fill {
+  stroke: var(--ink);
+}
+
+.dash-gauge-range {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--size-label);
+  padding: 0 2px;
+}
+
+/* A switch that cannot be pressed: ink, no olive, no pointer, no focus. It
+   states what the device reported and nothing more (roadmap 11.5 sends). */
+.dash-switch-row {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.dash-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-input);
+}
+
+.dash-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.dash-switch-on {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.dash-switch-on .dash-switch-knob {
+  left: 18px;
+  background: var(--surface);
+}
+
 /* --- layout helpers ------------------------------------------------------ */
 
 .stack {
@@ -1158,5 +1342,11 @@ a:hover {
 
   .slot {
     padding: var(--sp-7) var(--sp-4);
+  }
+
+  /* The dial goes above its value rather than squeezing it. */
+  .dash-gauge {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

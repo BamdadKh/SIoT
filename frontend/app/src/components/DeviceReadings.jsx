@@ -16,7 +16,7 @@ import { describeSequence } from '../lib/sequence.js';
  * was opened here with a key derived from the `DEVICE_SECRET` in the vault. The
  * server has the same bytes and cannot do this.
  *
- * **This is not the dashboard.** Phase 7.3 is where a schema's widget hints
+ * **This is not the dashboard.** The section above it is where a schema's widget hints
  * become graphs and gauges. What a declared field changes here is only its
  * label, its unit and its place in the row (`arrangeReadings`); a reading no
  * field describes is still a key and a value, since anything more would mean

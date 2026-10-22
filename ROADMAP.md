@@ -1024,10 +1024,37 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 > rename and has not been run against a server from this screen: Docker was not running.
 
 ### 7.3 Widget rendering
-- [ ] Build `Graph` widget (time series from decrypted records)
-- [ ] Build `Gauge` widget
-- [ ] Build `Toggle` widget (for actions: write-back to a device is Phase 11's `device_command_key` channel, not this phase; the widget renders state here and defers sending to 11.5)
-- [ ] Auto-render dashboard from schema + decrypted records, no per-device hardcoding
+- [x] Build `Graph` widget (time series from decrypted records)
+      Hand-drawn SVG, no chart library. **Spaced by record, not by time**: `seq` is the only
+      order the client trusts, the arrival time is the server's and the device clock is
+      unverified, so neither places a point; the two ends are labelled so the span is still
+      legible. The line breaks, with a dashed mark, at a gap, a restart, or a record that would
+      not open, because a line drawn across missing records is a claim about readings nobody
+      has. A value of the wrong type is counted and left off rather than coerced
+- [x] Build `Gauge` widget
+      A half dial over the declared `min`/`max`. A value outside it pins the needle to the end it
+      passed and the panel says so in words; otherwise the gauge would show the limit as the
+      reading
+- [x] Build `Toggle` widget (for actions: write-back to a device is Phase 11's `device_command_key` channel, not this phase; the widget renders state here and defers sending to 11.5)
+      Drawn in ink, not olive, with no pointer and no focus, since it cannot be pressed, and
+      captioned "Switching it from here is not built yet"
+- [x] Auto-render dashboard from schema + decrypted records, no per-device hardcoding
+      **Deviated: per device, not a cross-device dashboard.** A Dashboard section on
+      `DeviceDetail`, above Readings, one `.record` row per declared field
+      (`components/DeviceDashboard.jsx`). What each panel may claim is decided in
+      `app/src/lib/dashboard.js`, which `test/dashboard.test.js` covers (16 cases). Widget hints
+      are looked up in a fixed table; an unknown one draws as a plain value. Every value is the
+      newest among the records loaded on the page and is dated by arrival, never called
+      current, for the reason liveness never says "offline". A cross-device overview would mean
+      fetching and decrypting every device's records on the list page, and nothing yet asks
+      for it
+
+> **Walked against fixed props, not a live vault**, same as 7.1/7.2: a throwaway page (not
+> committed) rendered every widget with a gap, a restart, a refused record, an out-of-range
+> gauge, a mismatched latest value and a field the records never carried, at desktop and phone
+> width. That pass caught clipped scale labels, breaks too narrow to see, and a gauge that grew
+> to the full column on a phone. The dev server's self-signed certificate stops both browsers
+> available to the session at the warning page, so the real screen was not opened.
 
 ### 7.4 Layout
 - [ ] Drag-and-drop layout library integration (e.g. `react-grid-layout`)

@@ -131,7 +131,7 @@ export function DeviceFields({ username, entry, observed, reload }) {
       <p className="prose section-lede">
         What each reading is: what to call it, its unit, and how to show it. Stored in your vault
         beside this device&rsquo;s secret, so the server cannot tell a thermometer from a door
-        sensor. Graphs and gauges come with the dashboard; until then a reading shows as its value.
+        sensor. Once the device sends a declared field, the dashboard above draws it.
       </p>
 
       <form className="stack stack-4" onSubmit={handleSubmit}>
