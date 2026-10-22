@@ -754,13 +754,18 @@ bool SIoTCommand::getDouble(const char *name, double *out) const {
 }
 
 bool SIoTCommand::getText(const char *name, char *out, size_t capacity) const {
+  if (out == nullptr || capacity == 0) return false;
   CborParser parser;
   CborValue it, found;
   if (cbor_parser_init(args_, argsLen_, 0, &parser, &it) != CborNoError) return false;
   if (!cbor_value_is_map(&it) || cbor_value_map_find_value(&it, name, &found) != CborNoError) return false;
   if (!cbor_value_is_text_string(&found)) return false;
-  size_t length = capacity;
-  return cbor_value_copy_text_string(&found, out, &length, nullptr) == CborNoError;
+  /* TinyCBOR NUL-terminates and fails when the buffer is too small, so this is
+     already safe; the explicit terminator keeps it safe if that ever changes. */
+  size_t length = capacity - 1;
+  if (cbor_value_copy_text_string(&found, out, &length, nullptr) != CborNoError) return false;
+  out[length] = ' ';
+  return true;
 }
 
 /**
@@ -800,12 +805,13 @@ bool SIoTClient::openCommand(const uint8_t *nonce, const uint8_t *sealed, size_t
     return false;
   }
 
-  size_t typeLen = sizeof(command->type_);
+  size_t typeLen = sizeof(command->type_) - 1;
   if (cbor_value_map_find_value(&root, "type", &field) != CborNoError ||
       !cbor_value_is_text_string(&field) ||
       cbor_value_copy_text_string(&field, command->type_, &typeLen, nullptr) != CborNoError) {
     return false;
   }
+  command->type_[typeLen] = ' ';
 
   /* The args map is kept as its own encoded bytes: `ptr` before and after
      skipping it brackets exactly that item. */
@@ -885,7 +891,9 @@ SIoTStatus SIoTClient::pollCommands(SIoTCommandHandler handler) {
     fail("the server did not answer the command poll with 200");
     return code >= 500 ? SIoTStatus::ServerFailure : SIoTStatus::Rejected;
   }
-  if (http.getSize() > (int)COMMAND_RESPONSE_MAX) {
+  /* A negative size means chunked or unknown length, which would let a hostile
+     server stream an unbounded body into getString(). Refuse it rather than trust it. */
+  if (http.getSize() < 0 || http.getSize() > (int)COMMAND_RESPONSE_MAX) {
     http.end();
     fail("the command queue is larger than this device will read in one poll");
     return SIoTStatus::PayloadTooLarge;

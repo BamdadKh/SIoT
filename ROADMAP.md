@@ -1311,6 +1311,13 @@ its own phase, not an item folded in here.
 > strings; and the three working buffers are heap-allocated because ~3.7 KB on the 8 KB loop
 > task stack alongside TLS state was too tight to trust.
 
+> **Open decision: command freshness.** The untrusted server can withhold a command and deliver it
+> later, and the device will run it if its `command_seq` is above the mark. `command_seq` stops
+> replay, not delay. Requiring `seq == mark + 1` was rejected because one lost command would wedge
+> the device for good. The candidate fix is an `expires_at` inside the ciphertext, honoured only
+> when the device has a trusted clock (`t` is 0 on a clockless one). That changes the command
+> plaintext, so it wants a decision before the format is published.
+
 ### 11.4 Acknowledgement and pruning
 
 - [x] `POST /devices/:id/commands/ack`, device-authenticated by the same Ed25519 key
