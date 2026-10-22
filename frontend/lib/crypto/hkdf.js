@@ -19,6 +19,10 @@ export const HKDF_INFO = Object.freeze({
   // `device.js`. An "equivalent" label is not equivalent.
   DEVICE_DATA: 'siot/device/data/v1',
   DEVICE_SIGN: 'siot/device/sign/v1',
+  // Roadmap 10.1 and 11.1. Same status as the pair above: firmware derives
+  // these too, so they are a wire format, not naming.
+  DEVICE_NOTIFY: 'siot/device/notify/v1',
+  DEVICE_COMMAND: 'siot/device/command/v1',
 });
 
 /**

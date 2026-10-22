@@ -72,6 +72,28 @@ export async function deriveDeviceDataKey(deviceSecret) {
 }
 
 /**
+ * The key notification records are encrypted under (roadmap 10.1). Separate from
+ * `device_data_key` so a grant can expose alerts without exposing readings.
+ *
+ * @param {Uint8Array} deviceSecret 32 bytes
+ * @returns {Promise<Uint8Array>} 32 bytes.
+ */
+export async function deriveDeviceNotifyKey(deviceSecret) {
+  return hkdfSha256(assertDeviceSecret(deviceSecret), HKDF_INFO.DEVICE_NOTIFY);
+}
+
+/**
+ * The key dashboard-to-device commands are encrypted under (roadmap 11.1). The
+ * dashboard holds the secret, so it can derive this; the server never can.
+ *
+ * @param {Uint8Array} deviceSecret 32 bytes
+ * @returns {Promise<Uint8Array>} 32 bytes.
+ */
+export async function deriveDeviceCommandKey(deviceSecret) {
+  return hkdfSha256(assertDeviceSecret(deviceSecret), HKDF_INFO.DEVICE_COMMAND);
+}
+
+/**
  * The Ed25519 seed the device's signing keypair is built from.
  *
  * Returned as a seed rather than a keypair because that is what the firmware
@@ -95,19 +117,21 @@ export async function deriveDeviceSignSeed(deviceSecret) {
  * Best-effort in a GC'd runtime, the same caveat `deriveAccountKeys` carries.
  *
  * @param {Uint8Array} deviceSecret 32 bytes
- * @returns {Promise<{ dataKey: Uint8Array, signPub: Uint8Array }>}
+ * @returns {Promise<{ dataKey: Uint8Array, notifyKey: Uint8Array, commandKey: Uint8Array, signPub: Uint8Array }>}
  */
 export async function deriveDeviceKeys(deviceSecret) {
   assertDeviceSecret(deviceSecret);
 
-  const [dataKey, signSeed] = await Promise.all([
+  const [dataKey, notifyKey, commandKey, signSeed] = await Promise.all([
     deriveDeviceDataKey(deviceSecret),
+    deriveDeviceNotifyKey(deviceSecret),
+    deriveDeviceCommandKey(deviceSecret),
     deriveDeviceSignSeed(deviceSecret),
   ]);
 
   try {
     const signPub = await ed25519PublicKeyFromSeed(signSeed);
-    return { dataKey, signPub };
+    return { dataKey, notifyKey, commandKey, signPub };
   } finally {
     signSeed.fill(0);
   }
@@ -124,12 +148,14 @@ export async function deriveDeviceKeys(deviceSecret) {
  *   deviceId: Uint8Array,
  *   deviceSecret: Uint8Array,
  *   dataKey: Uint8Array,
+ *   notifyKey: Uint8Array,
+ *   commandKey: Uint8Array,
  *   signPub: Uint8Array,
  * }>}
  */
 export async function generateDevice() {
   const deviceId = generateDeviceId();
   const deviceSecret = generateDeviceSecret();
-  const { dataKey, signPub } = await deriveDeviceKeys(deviceSecret);
-  return { deviceId, deviceSecret, dataKey, signPub };
+  const { dataKey, notifyKey, commandKey, signPub } = await deriveDeviceKeys(deviceSecret);
+  return { deviceId, deviceSecret, dataKey, notifyKey, commandKey, signPub };
 }

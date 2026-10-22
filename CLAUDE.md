@@ -762,7 +762,7 @@ order, reordered from Fields; the drag-and-drop grid was left unbuilt on purpose
 rebinds `sign_pub` (password required) and returns the `seq` boundary; the vault entry keeps
 retired secrets so history still opens. Routes now include `/grants` and `/devices/:id/rotate`.
 
-The frontend suite is 214 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
+The frontend suite is 233 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
 `sequence.js`, `records.js`, `provisioning-protocol.js` and `cbor.js` are React-free so the
 suite reaches them directly, and `protocol-vectors.test.js` re-derives every published vector
 from scratch.

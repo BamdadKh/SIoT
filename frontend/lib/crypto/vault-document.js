@@ -237,7 +237,39 @@ function normaliseDeviceEntry(entry) {
       pendingBad = 1;
     }
   }
+  // Roadmap 11.2: starts at 1 because a fresh device's high-water mark is 0.
+  device.nextCommandSeq =
+    Number.isSafeInteger(entry.nextCommandSeq) && entry.nextCommandSeq >= 1 ? entry.nextCommandSeq : 1;
   return { device, schemaDropped: dropped, retiredDropped: retiredDropped + pendingBad };
+}
+
+/**
+ * Hands out the next `command_seq` for a device and bumps the stored counter
+ * (roadmap 11.2). The caller must `PUT /vault` the returned document *before*
+ * posting the command: a 409 then means another tab took this number, and the
+ * recovery is the usual one (refetch, re-apply). Posting first would let two tabs
+ * send the same `command_seq`, and the device would run only one of them.
+ *
+ * A number reserved and then never sent is harmless: the device only needs
+ * sequences to increase, not to be contiguous.
+ *
+ * @returns {{ document: { devices: Array }, commandSeq: number }}
+ */
+export function reserveCommandSeq(doc, deviceId) {
+  const device = findDevice(doc, deviceId);
+  if (!device) throw new Error('no such device in the vault');
+  const commandSeq = device.nextCommandSeq ?? 1;
+  if (!Number.isSafeInteger(commandSeq + 1)) throw new RangeError('command counter exhausted');
+  return {
+    commandSeq,
+    document: {
+      ...doc,
+      v: VAULT_DOCUMENT_VERSION,
+      devices: listDevices(doc).map((d) =>
+        d.id === deviceId ? { ...d, nextCommandSeq: commandSeq + 1 } : d,
+      ),
+    },
+  };
 }
 
 /**
@@ -289,6 +321,7 @@ export function addDevice(doc, { deviceId, deviceSecret, name, addedAt = new Dat
         secret: toBase64Url(deviceSecret),
         name: normaliseDeviceName(name),
         added_at: addedAt.toISOString(),
+        nextCommandSeq: 1,
       },
     ],
   };

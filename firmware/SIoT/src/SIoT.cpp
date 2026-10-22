@@ -56,6 +56,14 @@ static const char *KEY_SECRET = "secret";
  */
 static const char *KEY_BOOT_EPOCH = "boot";
 
+/*
+ * The highest `command_seq` this device has executed (roadmap 11.3). It lives in
+ * the `siot` partition beside `boot_epoch` for the same reason: a factory reset
+ * that reached it would let an old, still-valid command ciphertext run again,
+ * and a replayed command is a physical action repeating.
+ */
+static const char *KEY_COMMAND_SEQ = "cmdseq";
+
 /* --- key derivation ------------------------------------------------------- */
 
 /*
@@ -66,6 +74,8 @@ static const char *KEY_BOOT_EPOCH = "boot";
  */
 static const char *HKDF_INFO_DATA = "siot/device/data/v1";
 static const char *HKDF_INFO_SIGN = "siot/device/sign/v1";
+static const char *HKDF_INFO_NOTIFY = "siot/device/notify/v1";   /* roadmap 10.1 */
+static const char *HKDF_INFO_COMMAND = "siot/device/command/v1"; /* roadmap 11.1 */
 
 /** Fixed v1 protocol constants, not wire fields. See docs/protocol.md section 5. */
 static const uint8_t PROTOCOL_VERSION = 1;
@@ -111,6 +121,26 @@ static size_t b64urlEncode(const uint8_t *in, size_t len, char *out) {
   return o;
 }
 
+/** Returns the decoded length, or -1 on a character outside the alphabet or an impossible length. */
+static int b64urlDecode(const char *in, size_t inLen, uint8_t *out, size_t capacity) {
+  if (inLen % 4 == 1) return -1;
+  size_t o = 0;
+  uint32_t block = 0;
+  int bits = 0;
+  for (size_t i = 0; i < inLen; i += 1) {
+    const char *at = strchr(B64URL, in[i]);
+    if (in[i] == '\0' || at == nullptr) return -1;
+    block = (block << 6) | (uint32_t)(at - B64URL);
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      if (o >= capacity) return -1;
+      out[o++] = (uint8_t)((block >> bits) & 0xff);
+    }
+  }
+  return (int)o;
+}
+
 /* --- status --------------------------------------------------------------- */
 
 const char *SIoTStatusName(SIoTStatus status) {
@@ -145,6 +175,8 @@ SIoTClient::SIoTClient()
   memset(deviceId_, 0, sizeof(deviceId_));
   memset(deviceIdText_, 0, sizeof(deviceIdText_));
   memset(dataKey_, 0, sizeof(dataKey_));
+  memset(notifyKey_, 0, sizeof(notifyKey_));
+  memset(commandKey_, 0, sizeof(commandKey_));
   memset(signSecret_, 0, sizeof(signSecret_));
 }
 
@@ -273,6 +305,12 @@ bool SIoTClient::begin() {
       mbedtls_hkdf(sha256, nullptr, 0, secret, sizeof(secret),
                    (const unsigned char *)HKDF_INFO_DATA, strlen(HKDF_INFO_DATA),
                    dataKey_, sizeof(dataKey_)) == 0 &&
+      mbedtls_hkdf(sha256, nullptr, 0, secret, sizeof(secret),
+                   (const unsigned char *)HKDF_INFO_NOTIFY, strlen(HKDF_INFO_NOTIFY),
+                   notifyKey_, sizeof(notifyKey_)) == 0 &&
+      mbedtls_hkdf(sha256, nullptr, 0, secret, sizeof(secret),
+                   (const unsigned char *)HKDF_INFO_COMMAND, strlen(HKDF_INFO_COMMAND),
+                   commandKey_, sizeof(commandKey_)) == 0 &&
       mbedtls_hkdf(sha256, nullptr, 0, secret, sizeof(secret),
                    (const unsigned char *)HKDF_INFO_SIGN, strlen(HKDF_INFO_SIGN),
                    signSeed, sizeof(signSeed)) == 0;
@@ -473,6 +511,99 @@ SIoTStatus SIoTClient::buildRecord(char *out, size_t capacity, size_t *written) 
     return SIoTStatus::PayloadTooLarge;
   }
 
+  return sealAndSerialise(payload, payloadLen, dataKey_, seq, out, capacity, written);
+}
+
+/**
+ * Builds a notification record (roadmap 10.2). Same `seq` sequence as readings,
+ * same signature, same AAD; the payload says it is a notification and the key is
+ * `device_notify_key`. Pending readings are left alone.
+ */
+SIoTStatus SIoTClient::buildNotification(SIoTSeverity severity, const char *message, char *out,
+                                         size_t capacity, size_t *written) {
+  if (written != nullptr) *written = 0;
+  if (!ready_) {
+    fail("begin() has not run, or it failed");
+    return SIoTStatus::NotBegun;
+  }
+  if (deleted_) {
+    fail("this device has been deleted on the server; reprovision the board");
+    return SIoTStatus::DeviceUnknown;
+  }
+  if (message == nullptr || message[0] == '\0') {
+    fail("a notification needs a message");
+    return SIoTStatus::NoReadings;
+  }
+  /* Bounded here, not just in the dashboard: an unbounded ciphertext length
+     would let the payload size leak what the device is saying. */
+  if (strlen(message) > SIOT_NOTIFY_MESSAGE_MAX) {
+    fail("the notification message is too long");
+    return SIoTStatus::PayloadTooLarge;
+  }
+
+  const uint64_t seq = ((uint64_t)bootEpoch_ << 32) | (uint64_t)msgCounter_;
+  msgCounter_ += 1;
+
+  const time_t now = time(nullptr);
+  const uint32_t timestamp = now >= PLAUSIBLE_EPOCH ? (uint32_t)now : 0;
+
+  static const char *const SEVERITY_NAMES[] = {"info", "warning", "alert", "critical"};
+  const uint8_t level = (uint8_t)severity;
+  if (level >= sizeof(SEVERITY_NAMES) / sizeof(SEVERITY_NAMES[0])) {
+    fail("unknown notification severity");
+    return SIoTStatus::PayloadTooLarge;
+  }
+
+  uint8_t payload[SIOT_PAYLOAD_MAX];
+  CborEncoder root;
+  CborEncoder map;
+  cbor_encoder_init(&root, payload, sizeof(payload), 0);
+  const bool encoded =
+      cbor_encoder_create_map(&root, &map, 4) == CborNoError &&
+      cbor_encode_text_stringz(&map, "t") == CborNoError &&
+      cbor_encode_uint(&map, timestamp) == CborNoError &&
+      cbor_encode_text_stringz(&map, "type") == CborNoError &&
+      cbor_encode_text_stringz(&map, "notification") == CborNoError &&
+      cbor_encode_text_stringz(&map, "severity") == CborNoError &&
+      cbor_encode_text_stringz(&map, SEVERITY_NAMES[level]) == CborNoError &&
+      cbor_encode_text_stringz(&map, "message") == CborNoError &&
+      cbor_encode_text_stringz(&map, message) == CborNoError &&
+      cbor_encoder_close_container(&root, &map) == CborNoError;
+  if (!encoded) {
+    fail("the notification did not fit in one record");
+    return SIoTStatus::PayloadTooLarge;
+  }
+  const size_t payloadLen = cbor_encoder_get_buffer_size(&root, payload);
+  return sealAndSerialise(payload, payloadLen, notifyKey_, seq, out, capacity, written);
+}
+
+/** Build a notification, then get it there. Retries re-send the same bytes, as `send()` does. */
+SIoTStatus SIoTClient::notify(SIoTSeverity severity, const char *message, uint8_t attempts) {
+  char body[SIOT_RECORD_BODY_MAX];
+  const SIoTStatus built = buildNotification(severity, message, body, sizeof(body));
+  if (built != SIoTStatus::Ok) return built;
+
+  SIoTStatus status = SIoTStatus::NetworkFailure;
+  for (uint8_t attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) delay(RETRY_BASE_DELAY_MS << (attempt - 1));
+    status = post(body);
+    if (status != SIoTStatus::NetworkFailure && status != SIoTStatus::ServerFailure) break;
+  }
+  return status;
+}
+
+/**
+ * Everything after the payload is encoded: encrypt under `key`, sign, serialise.
+ *
+ * Shared by readings and notifications on purpose. They differ only in the
+ * payload and the key; the `seq`, the nonce, the AAD (with its constant record
+ * type byte) and the signature are the same code path, so there is no second
+ * place for a check to be subtly weaker (ROADMAP 10.0). The caller allocates
+ * `seq` from the one `msgCounter_`, which is what keeps two key streams from
+ * ever sharing a nonce.
+ */
+SIoTStatus SIoTClient::sealAndSerialise(uint8_t *payload, size_t payloadLen, const uint8_t *key,
+                                        uint64_t seq, char *out, size_t capacity, size_t *written) {
   uint8_t nonce[SIOT_NONCE_BYTES];
   uint8_t aad[SIOT_AAD_BYTES];
   buildNonce(nonce, seq);
@@ -483,12 +614,12 @@ SIoTStatus SIoTClient::buildRecord(char *out, size_t capacity, size_t *written) 
   mbedtls_gcm_context gcm;
   mbedtls_gcm_init(&gcm);
   const bool encrypted =
-      mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, dataKey_, 8 * SIOT_KEY_BYTES) == 0 &&
+      mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, 8 * SIOT_KEY_BYTES) == 0 &&
       mbedtls_gcm_crypt_and_tag(&gcm, MBEDTLS_GCM_ENCRYPT, payloadLen, nonce, SIOT_NONCE_BYTES,
                                 aad, SIOT_AAD_BYTES, payload, sealed, SIOT_TAG_BYTES,
                                 sealed + payloadLen) == 0;
   mbedtls_gcm_free(&gcm);
-  sodium_memzero(payload, sizeof(payload));
+  sodium_memzero(payload, payloadLen);
 
   if (!encrypted) {
     fail("AES-256-GCM encryption failed");
@@ -537,7 +668,6 @@ SIoTStatus SIoTClient::buildRecord(char *out, size_t capacity, size_t *written) 
   error_ = "";
   return SIoTStatus::Ok;
 }
-
 /**
  * Build one record, then get it there.
  *
@@ -563,6 +693,324 @@ SIoTStatus SIoTClient::send(uint8_t attempts) {
     if (status != SIoTStatus::NetworkFailure && status != SIoTStatus::ServerFailure) break;
   }
   return status;
+}
+
+
+/* --- commands (roadmap 11.3, 11.4) --------------------------------------- */
+
+static const uint8_t COMMAND_PROTOCOL_VERSION = 1;
+static const uint8_t COMMAND_CLASS_V1 = 1;
+static const size_t COMMAND_RESPONSE_MAX = 8192;
+
+/** Copies the string value of `"key":"..."` found between `from` and `to`. */
+static bool jsonString(const char *from, const char *to, const char *key, char *out, size_t capacity) {
+  char needle[24];
+  snprintf(needle, sizeof(needle), "\"%s\":\"", key);
+  const char *at = strstr(from, needle);
+  if (at == nullptr || at >= to) return false;
+  at += strlen(needle);
+  const char *end = strchr(at, '"');
+  if (end == nullptr || end > to || (size_t)(end - at) >= capacity) return false;
+  memcpy(out, at, (size_t)(end - at));
+  out[end - at] = '\0';
+  return true;
+}
+
+bool SIoTCommand::getInt(const char *name, long long *out) const {
+  CborParser parser;
+  CborValue it, found;
+  int64_t value = 0;
+  if (cbor_parser_init(args_, argsLen_, 0, &parser, &it) != CborNoError) return false;
+  if (!cbor_value_is_map(&it) || cbor_value_map_find_value(&it, name, &found) != CborNoError) return false;
+  if (!cbor_value_is_integer(&found) || cbor_value_get_int64(&found, &value) != CborNoError) return false;
+  *out = value;
+  return true;
+}
+
+bool SIoTCommand::getBool(const char *name, bool *out) const {
+  CborParser parser;
+  CborValue it, found;
+  if (cbor_parser_init(args_, argsLen_, 0, &parser, &it) != CborNoError) return false;
+  if (!cbor_value_is_map(&it) || cbor_value_map_find_value(&it, name, &found) != CborNoError) return false;
+  return cbor_value_is_boolean(&found) && cbor_value_get_boolean(&found, out) == CborNoError;
+}
+
+bool SIoTCommand::getDouble(const char *name, double *out) const {
+  CborParser parser;
+  CborValue it, found;
+  if (cbor_parser_init(args_, argsLen_, 0, &parser, &it) != CborNoError) return false;
+  if (!cbor_value_is_map(&it) || cbor_value_map_find_value(&it, name, &found) != CborNoError) return false;
+  if (cbor_value_is_double(&found)) return cbor_value_get_double(&found, out) == CborNoError;
+  if (cbor_value_is_float(&found)) {
+    float f = 0;
+    if (cbor_value_get_float(&found, &f) != CborNoError) return false;
+    *out = f;
+    return true;
+  }
+  long long integer = 0;
+  if (!getInt(name, &integer)) return false;
+  *out = (double)integer;
+  return true;
+}
+
+bool SIoTCommand::getText(const char *name, char *out, size_t capacity) const {
+  if (out == nullptr || capacity == 0) return false;
+  CborParser parser;
+  CborValue it, found;
+  if (cbor_parser_init(args_, argsLen_, 0, &parser, &it) != CborNoError) return false;
+  if (!cbor_value_is_map(&it) || cbor_value_map_find_value(&it, name, &found) != CborNoError) return false;
+  if (!cbor_value_is_text_string(&found)) return false;
+  /* TinyCBOR NUL-terminates and fails when the buffer is too small, so this is
+     already safe; the explicit terminator keeps it safe if that ever changes. */
+  size_t length = capacity - 1;
+  if (cbor_value_copy_text_string(&found, out, &length, nullptr) != CborNoError) return false;
+  out[length] = ' ';
+  return true;
+}
+
+/**
+ * Opens one command ciphertext and parses `{ command_seq, type, args }`.
+ * False for anything that does not open: a stranger polling the endpoint cannot
+ * produce a valid one, so a failure means corruption and is not worth alarming on.
+ */
+bool SIoTClient::openCommand(const uint8_t *nonce, const uint8_t *sealed, size_t sealedLen,
+                             uint8_t *plain, uint64_t *seq, SIoTCommand *command) {
+  if (sealedLen <= SIOT_TAG_BYTES) return false;
+  const size_t plainLen = sealedLen - SIOT_TAG_BYTES;
+
+  /* version(1B) || DEVICE_ID(16B) || command-class(1B), matching command.js. */
+  uint8_t aad[1 + SIOT_DEVICE_ID_BYTES + 1];
+  aad[0] = COMMAND_PROTOCOL_VERSION;
+  memcpy(aad + 1, deviceId_, SIOT_DEVICE_ID_BYTES);
+  aad[1 + SIOT_DEVICE_ID_BYTES] = COMMAND_CLASS_V1;
+
+  mbedtls_gcm_context gcm;
+  mbedtls_gcm_init(&gcm);
+  const bool opened =
+      mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, commandKey_, 8 * SIOT_KEY_BYTES) == 0 &&
+      mbedtls_gcm_auth_decrypt(&gcm, plainLen, nonce, SIOT_NONCE_BYTES, aad, sizeof(aad),
+                               sealed + plainLen, SIOT_TAG_BYTES, sealed, plain) == 0;
+  mbedtls_gcm_free(&gcm);
+  if (!opened) return false;
+
+  CborParser parser;
+  CborValue root, field;
+  if (cbor_parser_init(plain, plainLen, 0, &parser, &root) != CborNoError || !cbor_value_is_map(&root)) {
+    return false;
+  }
+
+  uint64_t sequence = 0;
+  if (cbor_value_map_find_value(&root, "command_seq", &field) != CborNoError ||
+      !cbor_value_is_unsigned_integer(&field) || cbor_value_get_uint64(&field, &sequence) != CborNoError) {
+    return false;
+  }
+
+  size_t typeLen = sizeof(command->type_) - 1;
+  if (cbor_value_map_find_value(&root, "type", &field) != CborNoError ||
+      !cbor_value_is_text_string(&field) ||
+      cbor_value_copy_text_string(&field, command->type_, &typeLen, nullptr) != CborNoError) {
+    return false;
+  }
+  command->type_[typeLen] = ' ';
+
+  /* The args map is kept as its own encoded bytes: `ptr` before and after
+     skipping it brackets exactly that item. */
+  if (cbor_value_map_find_value(&root, "args", &field) != CborNoError || !cbor_value_is_map(&field)) {
+    return false;
+  }
+  const uint8_t *argsStart = cbor_value_get_next_byte(&field);
+  CborValue after = field;
+  if (cbor_value_advance(&after) != CborNoError) return false;
+  command->args_ = argsStart;
+  command->argsLen_ = (size_t)(cbor_value_get_next_byte(&after) - argsStart);
+
+  command->seq_ = sequence;
+  *seq = sequence;
+  return true;
+}
+
+/** Persists the new mark and reads it back: the same discipline as `boot_epoch`. */
+bool SIoTClient::commitCommandSeq(uint64_t seq) {
+  Preferences store;
+  if (!store.begin(NVS_NAMESPACE, false, NVS_PARTITION)) return false;
+  const bool wrote = store.putULong64(KEY_COMMAND_SEQ, seq) == sizeof(uint64_t);
+  const bool verified = wrote && store.getULong64(KEY_COMMAND_SEQ, 0) == seq;
+  store.end();
+  return verified;
+}
+
+SIoTStatus SIoTClient::pollCommands(SIoTCommandHandler handler) {
+  if (!ready_) {
+    fail("begin() has not run, or it failed");
+    return SIoTStatus::NotBegun;
+  }
+  if (deleted_) {
+    fail("this device has been deleted on the server; reprovision the board");
+    return SIoTStatus::DeviceUnknown;
+  }
+
+  uint64_t mark = 0;
+  {
+    Preferences store;
+    if (!store.begin(NVS_NAMESPACE, false, NVS_PARTITION)) {
+      fail("the siot NVS partition could not be opened to read the command mark");
+      return SIoTStatus::StorageFailure;
+    }
+    mark = store.getULong64(KEY_COMMAND_SEQ, 0);
+    store.end();
+  }
+
+  WiFiClientSecure tls;
+  tls.setCACert(caCertPem_);
+  tls.setTimeout(HTTP_TIMEOUT_MS / 1000);
+
+  char url[200];
+  snprintf(url, sizeof(url), "%s/siot/devices/%s/commands", baseUrl_, deviceIdText_);
+
+  HTTPClient http;
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  http.setConnectTimeout(HTTP_TIMEOUT_MS);
+  if (!http.begin(tls, url)) {
+    fail("the server URL could not be parsed");
+    return SIoTStatus::NetworkFailure;
+  }
+  const int code = http.GET();
+  if (code <= 0) {
+    failNetwork("could not reach the server", code, 0, "");
+    http.end();
+    return SIoTStatus::NetworkFailure;
+  }
+  if (code == 404) {
+    http.end();
+    deleted_ = true;
+    fail("this device has been deleted on the server; reprovision the board");
+    return SIoTStatus::DeviceUnknown;
+  }
+  if (code != 200) {
+    http.end();
+    fail("the server did not answer the command poll with 200");
+    return code >= 500 ? SIoTStatus::ServerFailure : SIoTStatus::Rejected;
+  }
+  /* A negative size means chunked or unknown length, which would let a hostile
+     server stream an unbounded body into getString(). Refuse it rather than trust it. */
+  if (http.getSize() < 0 || http.getSize() > (int)COMMAND_RESPONSE_MAX) {
+    http.end();
+    fail("the command queue is larger than this device will read in one poll");
+    return SIoTStatus::PayloadTooLarge;
+  }
+  const String response = http.getString();
+  http.end();
+
+  /* The three working buffers are ~3.7 KB together, which is a lot to ask of the
+     8 KB loop task stack with TLS state also in play, so they live on the heap. */
+  static const size_t SEALED_MAX = 1100;
+  static const size_t SEALED_TEXT_MAX = 1500;
+  uint8_t *sealed = (uint8_t *)malloc(SEALED_MAX);
+  uint8_t *plain = (uint8_t *)malloc(SEALED_MAX);
+  char *sealedText = (char *)malloc(SEALED_TEXT_MAX);
+  if (sealed == nullptr || plain == nullptr || sealedText == nullptr) {
+    free(sealed);
+    free(plain);
+    free(sealedText);
+    fail("out of memory reading the command queue");
+    return SIoTStatus::StorageFailure;
+  }
+
+  const char *cursorAt = strstr(response.c_str(), "\"cursor\":");
+  uint64_t highestCursor = 0;
+  bool sawAny = false;
+
+  while (cursorAt != nullptr) {
+    const char *next = strstr(cursorAt + 9, "\"cursor\":");
+    const char *objectEnd = next != nullptr ? next : response.c_str() + response.length();
+
+    char cursorText[24], nonceText[24];
+    uint8_t nonce[SIOT_NONCE_BYTES];
+    int nonceLen = -1, sealedLen = -1;
+    if (jsonString(cursorAt, objectEnd, "cursor", cursorText, sizeof(cursorText)) &&
+        jsonString(cursorAt, objectEnd, "nonce", nonceText, sizeof(nonceText)) &&
+        jsonString(cursorAt, objectEnd, "ciphertext", sealedText, SEALED_TEXT_MAX)) {
+      const uint64_t cursor = strtoull(cursorText, nullptr, 10);
+      nonceLen = b64urlDecode(nonceText, strlen(nonceText), nonce, sizeof(nonce));
+      sealedLen = b64urlDecode(sealedText, strlen(sealedText), sealed, SEALED_MAX);
+      sawAny = true;
+      if (cursor > highestCursor) highestCursor = cursor;
+
+      SIoTCommand command;
+      uint64_t seq = 0;
+      if (nonceLen == (int)SIOT_NONCE_BYTES && sealedLen > 0 &&
+          openCommand(nonce, sealed, (size_t)sealedLen, plain, &seq, &command) && seq > mark) {
+        /* The mark moves first. If the side effect then crashes the board, the
+           command is lost rather than repeated, which is the safe direction for
+           a physical action. A device whose action is idempotent loses nothing
+           by this ordering either. */
+        if (!commitCommandSeq(seq)) {
+          fail("the command mark could not be committed to flash; not running the command");
+          sodium_memzero(plain, SEALED_MAX);
+          free(sealed);
+          free(plain);
+          free(sealedText);
+          return SIoTStatus::StorageFailure;
+        }
+        mark = seq;
+        if (handler != nullptr) handler(command);
+      }
+      sodium_memzero(plain, SEALED_MAX);
+    }
+    cursorAt = next;
+  }
+  free(sealed);
+  free(plain);
+  free(sealedText);
+
+  if (!sawAny) {
+    error_ = "";
+    return SIoTStatus::Ok;
+  }
+
+  /* Ack everything seen, including what was skipped or would not open: it has
+     been consumed either way, and leaving it queued would re-deliver it forever. */
+  uint8_t ackMessage[SIOT_DEVICE_ID_BYTES + 8];
+  memcpy(ackMessage, deviceId_, SIOT_DEVICE_ID_BYTES);
+  for (int i = 0; i < 8; i += 1) {
+    ackMessage[SIOT_DEVICE_ID_BYTES + i] = (uint8_t)((highestCursor >> (56 - 8 * i)) & 0xff);
+  }
+  uint8_t signature[SIOT_SIG_BYTES];
+  if (crypto_sign_ed25519_detached(signature, nullptr, ackMessage, sizeof(ackMessage), signSecret_) != 0) {
+    fail("signing the command ack failed");
+    return SIoTStatus::CryptoFailure;
+  }
+  char sigText[89];
+  b64urlEncode(signature, SIOT_SIG_BYTES, sigText);
+
+  char body[160];
+  snprintf(body, sizeof(body), "{\"up_to\":\"%llu\",\"sig\":\"%s\"}",
+           (unsigned long long)highestCursor, sigText);
+
+  WiFiClientSecure ackTls;
+  ackTls.setCACert(caCertPem_);
+  ackTls.setTimeout(HTTP_TIMEOUT_MS / 1000);
+  char ackUrl[220];
+  snprintf(ackUrl, sizeof(ackUrl), "%s/siot/devices/%s/commands/ack", baseUrl_, deviceIdText_);
+  HTTPClient ackHttp;
+  ackHttp.setTimeout(HTTP_TIMEOUT_MS);
+  ackHttp.setConnectTimeout(HTTP_TIMEOUT_MS);
+  if (!ackHttp.begin(ackTls, ackUrl)) {
+    fail("the server URL could not be parsed");
+    return SIoTStatus::NetworkFailure;
+  }
+  ackHttp.addHeader("Content-Type", "application/json");
+  const int ackCode = ackHttp.POST((uint8_t *)body, strlen(body));
+  ackHttp.end();
+
+  /* A lost ack is harmless: the commands come back next poll and the mark skips
+     them. That is the at-least-once delivery the design plans for. */
+  if (ackCode != 200) {
+    fail("the command ack was not accepted; the commands will be offered again");
+    return ackCode <= 0 ? SIoTStatus::NetworkFailure : SIoTStatus::Rejected;
+  }
+  error_ = "";
+  return SIoTStatus::Ok;
 }
 
 SIoTStatus SIoTClient::post(const char *body) {

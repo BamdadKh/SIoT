@@ -1120,6 +1120,16 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 - [ ] Use resulting `device_B_data_key` to decrypt B's records fetched from server
 - [ ] Test: A can read B's historical + live records without any always-on relay
 
+> **Blocked on a decision, found while reading the code for this item.** `GET
+> /devices/:id/records` is session-authenticated and owner-scoped, and a device holds no session.
+> So Device A can fetch and open a grant (`GET /devices/:id/grants` is public), but has no way to
+> fetch B's records. Fixing it needs a new device-authenticated read route, and the open question
+> is how it authorizes: probably an Ed25519-signed request from A (as the command ack is) plus a
+> check that a grant row `(A, B)` exists. That is a new security boundary, so it wants a design
+> note before code. Also unresolved: replay protection for a signed read (a timestamp or a
+> server nonce), and whether a grant should expose B's full history through that route or only
+> records after the grant. Nothing in 8.3 was built for this reason.
+
 ### 8.4 Revocation flow
 - [x] UI messaging: "revoke" = rotate B's `DEVICE_SECRET` via re-provisioning, old data stays readable by A forever
       The Grants section says a grant "cannot be withdrawn, only outrun" and links to rotation
@@ -1239,9 +1249,9 @@ surprise discovered by someone building it.
 
 ### 10.1 The notification key
 
-- [ ] Derive `device_notify_key` via HKDF from `DEVICE_SECRET`, info=`"siot/device/notify/v1"` — the third label alongside `"siot/device/data/v1"` and `"siot/device/sign/v1"` in `HKDF_INFO`, and like those two it is a wire format shared with every firmware port, not an internal name. Unique per device by construction, since `DEVICE_SECRET` is
-- [ ] Add it to `deriveDeviceKeys` in `frontend/lib/crypto/device.js` and to the ESP32 library's boot derivation, in the same commit — a label that exists on one side only is a device whose notifications nothing can open
-- [ ] Unit test: the notify key differs from the data key derived from the same secret, and both are reproducible
+- [x] Derive `device_notify_key` via HKDF from `DEVICE_SECRET`, info=`"siot/device/notify/v1"` — the third label alongside `"siot/device/data/v1"` and `"siot/device/sign/v1"` in `HKDF_INFO`, and like those two it is a wire format shared with every firmware port, not an internal name. Unique per device by construction, since `DEVICE_SECRET` is
+- [x] Add it to `deriveDeviceKeys` in `frontend/lib/crypto/device.js` and to the ESP32 library's boot derivation, in the same commit (derived into `notifyKey_` at `begin()`, unused until 10.2; compiles for esp32, not yet run on a board) — a label that exists on one side only is a device whose notifications nothing can open
+- [x] Unit test: the notify key differs from the data key derived from the same secret, and both are reproducible (`device.test.js`, with the command key; suite is 192)
 
 > **Why a separate key at all, when `device_data_key` is right there.** Grants (design 9.3)
 > wrap one key to hand one device's data to another. With a single key per device, a grant is
@@ -1252,16 +1262,16 @@ surprise discovered by someone building it.
 
 ### 10.2 Sending — device side
 
-- [ ] Extend the CBOR payload shape with a notification record: type marker, a short message, a severity from a fixed small set, and the device's own timestamp — all *inside* the encrypted payload
-- [ ] `siot.notify(severity, message)` in the ESP32 library, encrypting under `device_notify_key` and signing with the same Ed25519 key ordinary records use
-- [ ] Notifications and readings share one `seq` sequence, not two — `seq` feeds the nonce (design 7.2), and two counters over one key is nonce reuse waiting to happen. This is the single most dangerous thing to get wrong in this phase
-- [ ] Bound the message length in the library, not just in the UI: a device that can emit an arbitrarily long ciphertext lets its own payload size leak what it is saying
+- [x] Extend the CBOR payload shape with a notification record: type marker, a short message, a severity from a fixed small set, and the device's own timestamp — all *inside* the encrypted payload (client half: `buildNotificationPayload` in `frontend/lib/crypto/notification.js`. Shape is `{ t, type: "notification", severity, message }`; severities `info | warning | alert | critical`; message bounded at 120 UTF-8 bytes)
+- [x] `siot.notify(severity, message)` in the ESP32 library, encrypting under `device_notify_key` and signing with the same Ed25519 key ordinary records use (`SIoTClient::notify` and `buildNotification` in `firmware/SIoT/`; severity is `SIoTSeverity`. Compiles for esp32, **not yet run on a board**)
+- [x] Notifications and readings share one `seq` sequence, not two — `seq` feeds the nonce (design 7.2), and two counters over one key is nonce reuse waiting to happen. This is the single most dangerous thing to get wrong in this phase (both call one `sealAndSerialise` with `seq` allocated from the single `msgCounter_`, so the nonce, AAD and signature are one code path; the only differences are the payload and the key)
+- [x] Bound the message length in the library, not just in the UI: a device that can emit an arbitrarily long ciphertext lets its own payload size leak what it is saying (JS library and firmware both enforce 120 bytes; the firmware refuses with `PayloadTooLarge` before it consumes a `seq`. Bounding is not padding: a fixed-size payload is a separate decision)
 - [ ] Test: a notification and a reading uploaded from one boot are accepted, in order, with no `seq` collision
 
 ### 10.3 Reading — client side
 
-- [ ] Decrypt records with both `device_data_key` and `device_notify_key` and sort by the type marker inside the plaintext — a record that opens under neither is surfaced the way 6.3 surfaces a gap, as a signal rather than an error
-- [ ] Validate the decrypted notification against a strict allowlist before rendering, the same discipline 7.2 applies to schemas. The vault is authenticated and the record is signed, so this is not about tampering; it is that a device is a program someone wrote, and the dashboard renders whatever it says
+- [x] Decrypt records with both `device_data_key` and `device_notify_key` and sort by the type marker inside the plaintext — a record that opens under neither is surfaced the way 6.3 surfaces a gap, as a signal rather than an error (`openAnyRecord`: data key first, notify key second, throws if neither so the caller counts it unopened. Not yet wired into `use-device-records.js`, so until it is a notification shows there as an unopened record)
+- [x] Validate the decrypted notification against a strict allowlist before rendering, the same discipline 7.2 applies to schemas. The vault is authenticated and the record is signed, so this is not about tampering; it is that a device is a program someone wrote, and the dashboard renders whatever it says (`validateNotification`: rebuilds three members from checked values, strips controls and bidi, returns null for anything else; hostile-content test included. 7 tests, suite is 208)
 - [ ] Show which device each notification came from, by joining `DEVICE_ID` to the vault name through the existing `device-list.js` join — the server never learns the name, and a locked vault shows notifications attributed to a bare `DEVICE_ID`, the same honest degradation design 5.5 already accepts everywhere else
 - [ ] Order by `seq` within a device and by arrival time across devices, and say which is which — cross-device ordering uses the server's timestamps and is therefore only as trustworthy as the server
 
@@ -1367,21 +1377,28 @@ its own phase, not an item folded in here.
 
 ### 11.1 The command key
 
-- [ ] Derive `device_command_key` via HKDF from `DEVICE_SECRET`, info=`"siot/device/command/v1"`
+- [x] Derive `device_command_key` via HKDF from `DEVICE_SECRET`, info=`"siot/device/command/v1"`
       — the fourth label in `HKDF_INFO`, added to `deriveDeviceKeys` in
       `frontend/lib/crypto/device.js` and the ESP32 library's boot derivation in the same
       commit, same discipline 10.1 already states for the notify key
-- [ ] Unit test: distinct from `device_data_key`, `ed25519_seed` and `device_notify_key` derived
+- [x] Unit test: distinct from `device_data_key`, `ed25519_seed` and `device_notify_key` derived
       from the same secret; reproducible from the secret alone
 
 ### 11.2 Sending — dashboard side
 
-- [ ] Add a per-device `nextCommandSeq` counter to the vault document (`vault-document.js`),
+- [x] Add a per-device `nextCommandSeq` counter to the vault document (`vault-document.js`),
       next to `secret`/`name`; sending a command reads it, bumps it, and writes the vault before
       posting the command, so a 409 from a concurrent vault write is recoverable the same way
       every other vault mutation already is
-- [ ] Encrypt `{ command_seq, type, args }` under `device_command_key` with a random 96-bit
+- [x] Encrypt `{ command_seq, type, args }` under `device_command_key` with a random 96-bit
       nonce, AAD `version(1B) || DEVICE_ID(16B) || command-class byte`
+> Client half done in `frontend/lib/crypto/command.js` and `reserveCommandSeq` in
+> `vault-document.js` (counter starts at 1, since a fresh device's mark is 0; `addDevice`
+> seeds it; a corrupt value resets to 1 on read). `postCommand` in `app/src/lib/api.js` is the
+> wire call; nothing calls it until the Toggle widget (11.5). The device's side of the format
+> is exercised by `decryptCommand` in tests, 9 cases, suite is 201. The command-class byte is
+> `0x01`, the only class in v1.
+
 - [x] Route `POST /devices/:id/commands` (session-authenticated, owner-scoped like
       `POST /grants`): store ciphertext, nonce, and a server-assigned monotonic per-device
       cursor used only for delivery ordering and pruning (11.4) — never bound into the AAD,
@@ -1401,17 +1418,34 @@ its own phase, not an item folded in here.
 > is firmware work (`firmware/SIoT/`), out of scope for a backend-only pass the same way 11.1's
 > key derivation is.
 
-- [ ] `SIoT` library: poll `GET /devices/:id/commands` (public, unauthenticated by session, same
-      shape as `GET /devices/:id/grants` — the device holds no session either)
-- [ ] Decrypt each with `device_command_key`; discard anything that fails to open — a stranger
+- [x] `SIoT` library: poll `GET /devices/:id/commands` (public, unauthenticated by session, same
+      shape as `GET /devices/:id/grants` — the device holds no session either) `SIoTClient::pollCommands(handler)` in `firmware/SIoT/`. Compiles for esp32 and is **not yet run on a board or against a server**
+- [x] Decrypt each with `device_command_key`; discard anything that fails to open — a stranger
       polling this endpoint can't produce a valid one, so a failure here means corruption, not
-      an attack worth alarming on
-- [ ] Compare the decrypted `command_seq` against a persisted high-water mark (new NVS value,
+      an attack worth alarming on (AAD and plaintext layout match `frontend/lib/crypto/command.js`; anything that does not open is skipped and acked)
+- [x] Compare the decrypted `command_seq` against a persisted high-water mark (new NVS value,
       alongside `boot_epoch`, in the `siot` partition for the same reason that one is); skip
       anything at or below it, and persist the new mark **before** running a side effect the
-      sketch's own action can't otherwise make safe to repeat
+      sketch's own action can't otherwise make safe to repeat (NVS key `cmdseq` in the `siot` partition; committed and read back before the handler runs)
 - [ ] Test: a re-delivered ciphertext (ack never landed) is skipped the second time; a tampered
       ciphertext (flipped bit) is discarded, not executed
+
+> The device half exists as code but is unverified end to end. A hardware test would be: queue a
+> command from a script using `encryptCommand`, run `pollCommands`, confirm the handler fires once,
+> reboot, re-queue the same ciphertext, and confirm it is skipped. That is the unticked test above.
+> Deviations worth knowing: the device acks the highest cursor it *saw*, including commands that
+> would not open or were at or below the mark (they are consumed either way, and leaving them
+> queued would redeliver them forever); the JSON is scanned for `"cursor"`, `"nonce"` and
+> `"ciphertext"` by key rather than parsed, which depends on the server emitting them as flat
+> strings; and the three working buffers are heap-allocated because ~3.7 KB on the 8 KB loop
+> task stack alongside TLS state was too tight to trust.
+
+> **Open decision: command freshness.** The untrusted server can withhold a command and deliver it
+> later, and the device will run it if its `command_seq` is above the mark. `command_seq` stops
+> replay, not delay. Requiring `seq == mark + 1` was rejected because one lost command would wedge
+> the device for good. The candidate fix is an `expires_at` inside the ciphertext, honoured only
+> when the device has a trusted clock (`t` is 0 on a clockless one). That changes the command
+> plaintext, so it wants a decision before the format is published.
 
 ### 11.4 Acknowledgement and pruning
 
