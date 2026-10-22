@@ -968,15 +968,15 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 ## Phase 7 — Dashboard & Schemas
 
 ### 7.1 Schema definition
-- [ ] Define schema JSON shape (field name, type, widget hint) for a device
-- [ ] Client: form/UI for a device owner to declare a schema at pairing time
-- [ ] Store schema encrypted in vault alongside device secret
+- [x] Define schema JSON shape (field name, type, widget hint) for a device: `{ v, fields: [{ key, label, type, widget, unit?, min?, max? }] }` in `frontend/lib/crypto/device-schema.js`. `type` is `number | boolean | text`, mirroring the scalars the CBOR profile allows in `r`; `widget` is `graph | gauge | toggle | text` and must suit the type (no gauge of a boolean). A gauge requires a finite `min < max`; a `unit` is for numbers only
+- [ ] Client: form/UI for a device owner to declare a schema at pairing time. > Not built: new UI is Opus-only (CLAUDE.md rule 6)
+- [x] Store schema encrypted in vault alongside device secret: an optional `schema` on the vault device entry, set by `setDeviceSchema` in `vault-document.js`. No second encryption layer, same reasoning as 4.3. The data layer exists; nothing in `app/` calls it yet
 
 ### 7.2 Schema validation (untrusted input)
-- [ ] Write strict allowlist validator for schema field types before ever rendering
-- [ ] Reject/sanitize anything outside the allowlist
-- [ ] Confirm no path renders raw HTML or uses `dangerouslySetInnerHTML` from schema data
-- [ ] Test with a deliberately malicious schema payload (script tags, unexpected types) — confirm it's inert
+- [x] Write strict allowlist validator for schema field types before ever rendering: `normaliseSchema`. It rebuilds the object field by field from closed sets and copies nothing through, so unknown members, inherited properties and `__proto__`-style keys cannot reach a renderer. Also run on every vault read, so a stored schema is never trusted as stored
+- [x] Reject/sanitize anything outside the allowlist: bad fields are dropped and counted (same trade as `normaliseVaultDocument`: one bad field must not blank a dashboard), non-objects become the empty schema, and the field count is capped at 32. `setDeviceSchema` returns the drop count so a form can say so
+- [ ] Confirm no path renders raw HTML or uses `dangerouslySetInnerHTML` from schema data. > Left open: there is no renderer yet (7.3). Re-check when it exists; labels are plain strings for React to escape
+- [x] Test with a deliberately malicious schema payload (script tags, unexpected types) — confirm it's inert: `test/device-schema.test.js`, 17 cases including a payload with `__proto__`, `dangerouslySetInnerHTML`, `href: javascript:` and non-object fields. A `<script>` label survives only as inert text; the suite is 183, up from 166
 
 ### 7.3 Widget rendering
 - [ ] Build `Graph` widget (time series from decrypted records)

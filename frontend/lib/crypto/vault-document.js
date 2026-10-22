@@ -32,6 +32,7 @@
 
 import { toBase64Url, fromBase64Url } from './encoding.js';
 import { DEVICE_ID_BYTES, DEVICE_SECRET_BYTES } from './device.js';
+import { normaliseSchema } from './device-schema.js';
 
 /**
  * Bumped only for a change old clients cannot read. Additive fields do not need
@@ -152,11 +153,45 @@ function normaliseDeviceEntry(entry) {
   if (typeof entry !== 'object' || entry === null) {
     throw new TypeError('device entry must be an object');
   }
-  return {
+  const device = {
     id: assertBase64UrlBytes(entry.id, DEVICE_ID_BYTES, 'DEVICE_ID'),
     secret: assertBase64UrlBytes(entry.secret, DEVICE_SECRET_BYTES, 'DEVICE_SECRET'),
     name: normaliseDeviceName(entry.name),
     added_at: typeof entry.added_at === 'string' ? entry.added_at : new Date(0).toISOString(),
+  };
+  // Optional, and always rebuilt through the allowlist: the schema is the one
+  // part of an entry that drives rendering (design 11.1), so it is never copied
+  // through as stored even though the vault is authenticated.
+  if (entry.schema !== undefined) device.schema = normaliseSchema(entry.schema).schema;
+  return device;
+}
+
+/**
+ * Declares (or replaces) a device's schema. An ordinary vault write, like a
+ * rename. The input goes through the same allowlist a read does, so what is
+ * stored is already what a reader will accept.
+ *
+ * @param {{ devices: Array }} doc
+ * @param {string} deviceId base64url
+ * @param {unknown} schema
+ * @returns {{ document: { devices: Array }, dropped: number }} `dropped` counts
+ *   fields the allowlist refused, so the form can say so instead of saving less
+ *   than was typed without a word.
+ */
+export function setDeviceSchema(doc, deviceId, schema) {
+  if (!findDevice(doc, deviceId)) {
+    throw new Error('no such device in the vault');
+  }
+  const { schema: clean, dropped } = normaliseSchema(schema);
+  return {
+    document: {
+      ...doc,
+      v: VAULT_DOCUMENT_VERSION,
+      devices: listDevices(doc).map((device) =>
+        device.id === deviceId ? { ...device, schema: clean } : device,
+      ),
+    },
+    dropped,
   };
 }
 
