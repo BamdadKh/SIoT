@@ -33,6 +33,8 @@ export {
   deriveDeviceKeys,
   deriveDeviceDataKey,
   deriveDeviceSignSeed,
+  deriveDeviceNotifyKey,
+  deriveDeviceCommandKey,
   DEVICE_ID_BYTES,
   DEVICE_SECRET_BYTES,
 } from './device.js';

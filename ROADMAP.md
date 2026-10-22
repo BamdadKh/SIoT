@@ -1110,9 +1110,9 @@ surprise discovered by someone building it.
 
 ### 10.1 The notification key
 
-- [ ] Derive `device_notify_key` via HKDF from `DEVICE_SECRET`, info=`"siot/device/notify/v1"` — the third label alongside `"siot/device/data/v1"` and `"siot/device/sign/v1"` in `HKDF_INFO`, and like those two it is a wire format shared with every firmware port, not an internal name. Unique per device by construction, since `DEVICE_SECRET` is
-- [ ] Add it to `deriveDeviceKeys` in `frontend/lib/crypto/device.js` and to the ESP32 library's boot derivation, in the same commit — a label that exists on one side only is a device whose notifications nothing can open
-- [ ] Unit test: the notify key differs from the data key derived from the same secret, and both are reproducible
+- [x] Derive `device_notify_key` via HKDF from `DEVICE_SECRET`, info=`"siot/device/notify/v1"` — the third label alongside `"siot/device/data/v1"` and `"siot/device/sign/v1"` in `HKDF_INFO`, and like those two it is a wire format shared with every firmware port, not an internal name. Unique per device by construction, since `DEVICE_SECRET` is
+- [x] Add it to `deriveDeviceKeys` in `frontend/lib/crypto/device.js` and to the ESP32 library's boot derivation, in the same commit (derived into `notifyKey_` at `begin()`, unused until 10.2; compiles for esp32, not yet run on a board) — a label that exists on one side only is a device whose notifications nothing can open
+- [x] Unit test: the notify key differs from the data key derived from the same secret, and both are reproducible (`device.test.js`, with the command key; suite is 192)
 
 > **Why a separate key at all, when `device_data_key` is right there.** Grants (design 9.3)
 > wrap one key to hand one device's data to another. With a single key per device, a grant is
@@ -1238,11 +1238,11 @@ its own phase, not an item folded in here.
 
 ### 11.1 The command key
 
-- [ ] Derive `device_command_key` via HKDF from `DEVICE_SECRET`, info=`"siot/device/command/v1"`
+- [x] Derive `device_command_key` via HKDF from `DEVICE_SECRET`, info=`"siot/device/command/v1"`
       — the fourth label in `HKDF_INFO`, added to `deriveDeviceKeys` in
       `frontend/lib/crypto/device.js` and the ESP32 library's boot derivation in the same
       commit, same discipline 10.1 already states for the notify key
-- [ ] Unit test: distinct from `device_data_key`, `ed25519_seed` and `device_notify_key` derived
+- [x] Unit test: distinct from `device_data_key`, `ed25519_seed` and `device_notify_key` derived
       from the same secret; reproducible from the secret alone
 
 ### 11.2 Sending — dashboard side

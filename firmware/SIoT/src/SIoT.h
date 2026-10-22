@@ -248,6 +248,8 @@ class SIoTClient {
   uint8_t deviceId_[SIOT_DEVICE_ID_BYTES];
   char deviceIdText_[SIOT_DEVICE_ID_TEXT_BYTES];
   uint8_t dataKey_[SIOT_KEY_BYTES];
+  uint8_t notifyKey_[SIOT_KEY_BYTES];  /* derived now, used by Phase 10.2 */
+  uint8_t commandKey_[SIOT_KEY_BYTES]; /* derived now, used by Phase 11.3 */
   /** libsodium's expanded secret key: seed || public key. Never leaves this object. */
   uint8_t signSecret_[64];
 

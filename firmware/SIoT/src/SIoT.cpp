@@ -66,6 +66,8 @@ static const char *KEY_BOOT_EPOCH = "boot";
  */
 static const char *HKDF_INFO_DATA = "siot/device/data/v1";
 static const char *HKDF_INFO_SIGN = "siot/device/sign/v1";
+static const char *HKDF_INFO_NOTIFY = "siot/device/notify/v1";   /* roadmap 10.1 */
+static const char *HKDF_INFO_COMMAND = "siot/device/command/v1"; /* roadmap 11.1 */
 
 /** Fixed v1 protocol constants, not wire fields. See docs/protocol.md section 5. */
 static const uint8_t PROTOCOL_VERSION = 1;
@@ -145,6 +147,8 @@ SIoTClient::SIoTClient()
   memset(deviceId_, 0, sizeof(deviceId_));
   memset(deviceIdText_, 0, sizeof(deviceIdText_));
   memset(dataKey_, 0, sizeof(dataKey_));
+  memset(notifyKey_, 0, sizeof(notifyKey_));
+  memset(commandKey_, 0, sizeof(commandKey_));
   memset(signSecret_, 0, sizeof(signSecret_));
 }
 
@@ -273,6 +277,12 @@ bool SIoTClient::begin() {
       mbedtls_hkdf(sha256, nullptr, 0, secret, sizeof(secret),
                    (const unsigned char *)HKDF_INFO_DATA, strlen(HKDF_INFO_DATA),
                    dataKey_, sizeof(dataKey_)) == 0 &&
+      mbedtls_hkdf(sha256, nullptr, 0, secret, sizeof(secret),
+                   (const unsigned char *)HKDF_INFO_NOTIFY, strlen(HKDF_INFO_NOTIFY),
+                   notifyKey_, sizeof(notifyKey_)) == 0 &&
+      mbedtls_hkdf(sha256, nullptr, 0, secret, sizeof(secret),
+                   (const unsigned char *)HKDF_INFO_COMMAND, strlen(HKDF_INFO_COMMAND),
+                   commandKey_, sizeof(commandKey_)) == 0 &&
       mbedtls_hkdf(sha256, nullptr, 0, secret, sizeof(secret),
                    (const unsigned char *)HKDF_INFO_SIGN, strlen(HKDF_INFO_SIGN),
                    signSeed, sizeof(signSeed)) == 0;

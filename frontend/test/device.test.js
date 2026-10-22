@@ -100,3 +100,39 @@ test('rejects a DEVICE_SECRET that is not 32 bytes', async () => {
   await assert.rejects(() => deriveDeviceDataKey(randomBytes(31)), TypeError);
   await assert.rejects(() => deriveDeviceSignSeed('not bytes'), TypeError);
 });
+
+// Roadmap 10.1 and 11.1: the third and fourth labels.
+test('data, notify, command and signing keys are four distinct values from one secret', async () => {
+  const { deriveDeviceNotifyKey, deriveDeviceCommandKey, deriveDeviceSignSeed } = await import(
+    '../lib/crypto/device.js'
+  );
+  const secret = generateDeviceSecret();
+  const keys = await Promise.all([
+    deriveDeviceDataKey(secret),
+    deriveDeviceNotifyKey(secret),
+    deriveDeviceCommandKey(secret),
+    deriveDeviceSignSeed(secret),
+  ]);
+  const hex = keys.map((k) => Buffer.from(k).toString('hex'));
+  assert.equal(new Set(hex).size, 4);
+  for (const k of keys) assert.equal(k.length, 32);
+});
+
+test('notify and command keys are reproducible from the secret alone, and per-device', async () => {
+  const { deriveDeviceNotifyKey, deriveDeviceCommandKey } = await import('../lib/crypto/device.js');
+  const secret = generateDeviceSecret();
+  assert.deepEqual(await deriveDeviceNotifyKey(secret), await deriveDeviceNotifyKey(secret));
+  assert.deepEqual(await deriveDeviceCommandKey(secret), await deriveDeviceCommandKey(secret));
+  assert.notDeepEqual(
+    await deriveDeviceNotifyKey(secret),
+    await deriveDeviceNotifyKey(generateDeviceSecret()),
+  );
+});
+
+test('deriveDeviceKeys hands back the notify and command keys too', async () => {
+  const { deriveDeviceNotifyKey, deriveDeviceCommandKey } = await import('../lib/crypto/device.js');
+  const secret = generateDeviceSecret();
+  const keys = await deriveDeviceKeys(secret);
+  assert.deepEqual(keys.notifyKey, await deriveDeviceNotifyKey(secret));
+  assert.deepEqual(keys.commandKey, await deriveDeviceCommandKey(secret));
+});
