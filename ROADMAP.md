@@ -1124,9 +1124,9 @@ surprise discovered by someone building it.
 ### 10.2 Sending — device side
 
 - [x] Extend the CBOR payload shape with a notification record: type marker, a short message, a severity from a fixed small set, and the device's own timestamp — all *inside* the encrypted payload (client half: `buildNotificationPayload` in `frontend/lib/crypto/notification.js`. Shape is `{ t, type: "notification", severity, message }`; severities `info | warning | alert | critical`; message bounded at 120 UTF-8 bytes)
-- [ ] `siot.notify(severity, message)` in the ESP32 library, encrypting under `device_notify_key` and signing with the same Ed25519 key ordinary records use
-- [ ] Notifications and readings share one `seq` sequence, not two — `seq` feeds the nonce (design 7.2), and two counters over one key is nonce reuse waiting to happen. This is the single most dangerous thing to get wrong in this phase
-- [x] Bound the message length in the library, not just in the UI: a device that can emit an arbitrarily long ciphertext lets its own payload size leak what it is saying (bound exists in the JS library; the **firmware** bound lands with `siot.notify()`. Bounding is not padding: a fixed-size payload is a separate decision)
+- [x] `siot.notify(severity, message)` in the ESP32 library, encrypting under `device_notify_key` and signing with the same Ed25519 key ordinary records use (`SIoTClient::notify` and `buildNotification` in `firmware/SIoT/`; severity is `SIoTSeverity`. Compiles for esp32, **not yet run on a board**)
+- [x] Notifications and readings share one `seq` sequence, not two — `seq` feeds the nonce (design 7.2), and two counters over one key is nonce reuse waiting to happen. This is the single most dangerous thing to get wrong in this phase (both call one `sealAndSerialise` with `seq` allocated from the single `msgCounter_`, so the nonce, AAD and signature are one code path; the only differences are the payload and the key)
+- [x] Bound the message length in the library, not just in the UI: a device that can emit an arbitrarily long ciphertext lets its own payload size leak what it is saying (JS library and firmware both enforce 120 bytes; the firmware refuses with `PayloadTooLarge` before it consumes a `seq`. Bounding is not padding: a fixed-size payload is a separate decision)
 - [ ] Test: a notification and a reading uploaded from one boot are accepted, in order, with no `seq` collision
 
 ### 10.3 Reading — client side

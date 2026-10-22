@@ -483,6 +483,99 @@ SIoTStatus SIoTClient::buildRecord(char *out, size_t capacity, size_t *written) 
     return SIoTStatus::PayloadTooLarge;
   }
 
+  return sealAndSerialise(payload, payloadLen, dataKey_, seq, out, capacity, written);
+}
+
+/**
+ * Builds a notification record (roadmap 10.2). Same `seq` sequence as readings,
+ * same signature, same AAD; the payload says it is a notification and the key is
+ * `device_notify_key`. Pending readings are left alone.
+ */
+SIoTStatus SIoTClient::buildNotification(SIoTSeverity severity, const char *message, char *out,
+                                         size_t capacity, size_t *written) {
+  if (written != nullptr) *written = 0;
+  if (!ready_) {
+    fail("begin() has not run, or it failed");
+    return SIoTStatus::NotBegun;
+  }
+  if (deleted_) {
+    fail("this device has been deleted on the server; reprovision the board");
+    return SIoTStatus::DeviceUnknown;
+  }
+  if (message == nullptr || message[0] == '\0') {
+    fail("a notification needs a message");
+    return SIoTStatus::NoReadings;
+  }
+  /* Bounded here, not just in the dashboard: an unbounded ciphertext length
+     would let the payload size leak what the device is saying. */
+  if (strlen(message) > SIOT_NOTIFY_MESSAGE_MAX) {
+    fail("the notification message is too long");
+    return SIoTStatus::PayloadTooLarge;
+  }
+
+  const uint64_t seq = ((uint64_t)bootEpoch_ << 32) | (uint64_t)msgCounter_;
+  msgCounter_ += 1;
+
+  const time_t now = time(nullptr);
+  const uint32_t timestamp = now >= PLAUSIBLE_EPOCH ? (uint32_t)now : 0;
+
+  static const char *const SEVERITY_NAMES[] = {"info", "warning", "alert", "critical"};
+  const uint8_t level = (uint8_t)severity;
+  if (level >= sizeof(SEVERITY_NAMES) / sizeof(SEVERITY_NAMES[0])) {
+    fail("unknown notification severity");
+    return SIoTStatus::PayloadTooLarge;
+  }
+
+  uint8_t payload[SIOT_PAYLOAD_MAX];
+  CborEncoder root;
+  CborEncoder map;
+  cbor_encoder_init(&root, payload, sizeof(payload), 0);
+  const bool encoded =
+      cbor_encoder_create_map(&root, &map, 4) == CborNoError &&
+      cbor_encode_text_stringz(&map, "t") == CborNoError &&
+      cbor_encode_uint(&map, timestamp) == CborNoError &&
+      cbor_encode_text_stringz(&map, "type") == CborNoError &&
+      cbor_encode_text_stringz(&map, "notification") == CborNoError &&
+      cbor_encode_text_stringz(&map, "severity") == CborNoError &&
+      cbor_encode_text_stringz(&map, SEVERITY_NAMES[level]) == CborNoError &&
+      cbor_encode_text_stringz(&map, "message") == CborNoError &&
+      cbor_encode_text_stringz(&map, message) == CborNoError &&
+      cbor_encoder_close_container(&root, &map) == CborNoError;
+  if (!encoded) {
+    fail("the notification did not fit in one record");
+    return SIoTStatus::PayloadTooLarge;
+  }
+  const size_t payloadLen = cbor_encoder_get_buffer_size(&root, payload);
+  return sealAndSerialise(payload, payloadLen, notifyKey_, seq, out, capacity, written);
+}
+
+/** Build a notification, then get it there. Retries re-send the same bytes, as `send()` does. */
+SIoTStatus SIoTClient::notify(SIoTSeverity severity, const char *message, uint8_t attempts) {
+  char body[SIOT_RECORD_BODY_MAX];
+  const SIoTStatus built = buildNotification(severity, message, body, sizeof(body));
+  if (built != SIoTStatus::Ok) return built;
+
+  SIoTStatus status = SIoTStatus::NetworkFailure;
+  for (uint8_t attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) delay(RETRY_BASE_DELAY_MS << (attempt - 1));
+    status = post(body);
+    if (status != SIoTStatus::NetworkFailure && status != SIoTStatus::ServerFailure) break;
+  }
+  return status;
+}
+
+/**
+ * Everything after the payload is encoded: encrypt under `key`, sign, serialise.
+ *
+ * Shared by readings and notifications on purpose. They differ only in the
+ * payload and the key; the `seq`, the nonce, the AAD (with its constant record
+ * type byte) and the signature are the same code path, so there is no second
+ * place for a check to be subtly weaker (ROADMAP 10.0). The caller allocates
+ * `seq` from the one `msgCounter_`, which is what keeps two key streams from
+ * ever sharing a nonce.
+ */
+SIoTStatus SIoTClient::sealAndSerialise(uint8_t *payload, size_t payloadLen, const uint8_t *key,
+                                        uint64_t seq, char *out, size_t capacity, size_t *written) {
   uint8_t nonce[SIOT_NONCE_BYTES];
   uint8_t aad[SIOT_AAD_BYTES];
   buildNonce(nonce, seq);
@@ -493,12 +586,12 @@ SIoTStatus SIoTClient::buildRecord(char *out, size_t capacity, size_t *written) 
   mbedtls_gcm_context gcm;
   mbedtls_gcm_init(&gcm);
   const bool encrypted =
-      mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, dataKey_, 8 * SIOT_KEY_BYTES) == 0 &&
+      mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, 8 * SIOT_KEY_BYTES) == 0 &&
       mbedtls_gcm_crypt_and_tag(&gcm, MBEDTLS_GCM_ENCRYPT, payloadLen, nonce, SIOT_NONCE_BYTES,
                                 aad, SIOT_AAD_BYTES, payload, sealed, SIOT_TAG_BYTES,
                                 sealed + payloadLen) == 0;
   mbedtls_gcm_free(&gcm);
-  sodium_memzero(payload, sizeof(payload));
+  sodium_memzero(payload, payloadLen);
 
   if (!encrypted) {
     fail("AES-256-GCM encryption failed");
@@ -547,7 +640,6 @@ SIoTStatus SIoTClient::buildRecord(char *out, size_t capacity, size_t *written) 
   error_ = "";
   return SIoTStatus::Ok;
 }
-
 /**
  * Build one record, then get it there.
  *
