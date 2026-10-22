@@ -39,6 +39,13 @@ export {
   DEVICE_SECRET_BYTES,
 } from './device.js';
 export { encodeCbor, decodeCbor } from './cbor.js';
+export {
+  encryptCommand,
+  decryptCommand,
+  commandAad,
+  COMMAND_PROTOCOL_VERSION,
+  COMMAND_CLASS_V1,
+} from './command.js';
 export { createGrant, openGrant, grantAad, GRANT_BLOB_BYTES } from './grant.js';
 export {
   composeSeq,

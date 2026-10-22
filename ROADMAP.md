@@ -1247,12 +1247,19 @@ its own phase, not an item folded in here.
 
 ### 11.2 Sending — dashboard side
 
-- [ ] Add a per-device `nextCommandSeq` counter to the vault document (`vault-document.js`),
+- [x] Add a per-device `nextCommandSeq` counter to the vault document (`vault-document.js`),
       next to `secret`/`name`; sending a command reads it, bumps it, and writes the vault before
       posting the command, so a 409 from a concurrent vault write is recoverable the same way
       every other vault mutation already is
-- [ ] Encrypt `{ command_seq, type, args }` under `device_command_key` with a random 96-bit
+- [x] Encrypt `{ command_seq, type, args }` under `device_command_key` with a random 96-bit
       nonce, AAD `version(1B) || DEVICE_ID(16B) || command-class byte`
+> Client half done in `frontend/lib/crypto/command.js` and `reserveCommandSeq` in
+> `vault-document.js` (counter starts at 1, since a fresh device's mark is 0; `addDevice`
+> seeds it; a corrupt value resets to 1 on read). `postCommand` in `app/src/lib/api.js` is the
+> wire call; nothing calls it until the Toggle widget (11.5). The device's side of the format
+> is exercised by `decryptCommand` in tests, 9 cases, suite is 201. The command-class byte is
+> `0x01`, the only class in v1.
+
 - [x] Route `POST /devices/:id/commands` (session-authenticated, owner-scoped like
       `POST /grants`): store ciphertext, nonce, and a server-assigned monotonic per-device
       cursor used only for delivery ordering and pruning (11.4) — never bound into the AAD,

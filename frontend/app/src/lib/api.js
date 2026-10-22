@@ -148,6 +148,18 @@ export function createGrantRecord(body) {
 }
 
 /**
+ * Posts an encrypted command for a device to poll (roadmap 11.2). Callers must
+ * have written the vault with the reserved `command_seq` first (see
+ * `reserveCommandSeq`), so a 409 from `PUT /vault` happens before anything is sent.
+ *
+ * @param {string} deviceId base64url
+ * @param {{ ciphertext: string, nonce: string }} body
+ */
+export function postCommand(deviceId, body) {
+  return request('POST', `/devices/${deviceId}/commands`, body);
+}
+
+/**
  * The metadata the server legitimately holds per device. No names: it has none.
  *
  * @returns {Promise<{ devices: Array<{ device_id: string, last_seq: string, last_seen_at: string|null }> }>}
