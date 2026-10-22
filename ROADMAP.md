@@ -1021,6 +1021,16 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 - [ ] Use resulting `device_B_data_key` to decrypt B's records fetched from server
 - [ ] Test: A can read B's historical + live records without any always-on relay
 
+> **Blocked on a decision, found while reading the code for this item.** `GET
+> /devices/:id/records` is session-authenticated and owner-scoped, and a device holds no session.
+> So Device A can fetch and open a grant (`GET /devices/:id/grants` is public), but has no way to
+> fetch B's records. Fixing it needs a new device-authenticated read route, and the open question
+> is how it authorizes: probably an Ed25519-signed request from A (as the command ack is) plus a
+> check that a grant row `(A, B)` exists. That is a new security boundary, so it wants a design
+> note before code. Also unresolved: replay protection for a signed read (a timestamp or a
+> server nonce), and whether a grant should expose B's full history through that route or only
+> records after the grant. Nothing in 8.3 was built for this reason.
+
 ### 8.4 Revocation flow
 - [ ] UI messaging: "revoke" = rotate B's `DEVICE_SECRET` via re-provisioning, old data stays readable by A forever
 - [ ] Re-provisioning flow reuses the Phase 4 tool with a new `DEVICE_SECRET`, updates vault entry, old grants naturally stop covering new data — the device's name should survive the rotation, since it is the same physical thing in the same place
