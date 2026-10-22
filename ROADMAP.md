@@ -1123,16 +1123,16 @@ surprise discovered by someone building it.
 
 ### 10.2 Sending — device side
 
-- [ ] Extend the CBOR payload shape with a notification record: type marker, a short message, a severity from a fixed small set, and the device's own timestamp — all *inside* the encrypted payload
+- [x] Extend the CBOR payload shape with a notification record: type marker, a short message, a severity from a fixed small set, and the device's own timestamp — all *inside* the encrypted payload (client half: `buildNotificationPayload` in `frontend/lib/crypto/notification.js`. Shape is `{ t, type: "notification", severity, message }`; severities `info | warning | alert | critical`; message bounded at 120 UTF-8 bytes)
 - [ ] `siot.notify(severity, message)` in the ESP32 library, encrypting under `device_notify_key` and signing with the same Ed25519 key ordinary records use
 - [ ] Notifications and readings share one `seq` sequence, not two — `seq` feeds the nonce (design 7.2), and two counters over one key is nonce reuse waiting to happen. This is the single most dangerous thing to get wrong in this phase
-- [ ] Bound the message length in the library, not just in the UI: a device that can emit an arbitrarily long ciphertext lets its own payload size leak what it is saying
+- [x] Bound the message length in the library, not just in the UI: a device that can emit an arbitrarily long ciphertext lets its own payload size leak what it is saying (bound exists in the JS library; the **firmware** bound lands with `siot.notify()`. Bounding is not padding: a fixed-size payload is a separate decision)
 - [ ] Test: a notification and a reading uploaded from one boot are accepted, in order, with no `seq` collision
 
 ### 10.3 Reading — client side
 
-- [ ] Decrypt records with both `device_data_key` and `device_notify_key` and sort by the type marker inside the plaintext — a record that opens under neither is surfaced the way 6.3 surfaces a gap, as a signal rather than an error
-- [ ] Validate the decrypted notification against a strict allowlist before rendering, the same discipline 7.2 applies to schemas. The vault is authenticated and the record is signed, so this is not about tampering; it is that a device is a program someone wrote, and the dashboard renders whatever it says
+- [x] Decrypt records with both `device_data_key` and `device_notify_key` and sort by the type marker inside the plaintext — a record that opens under neither is surfaced the way 6.3 surfaces a gap, as a signal rather than an error (`openAnyRecord`: data key first, notify key second, throws if neither so the caller counts it unopened. Not yet wired into `use-device-records.js`, so until it is a notification shows there as an unopened record)
+- [x] Validate the decrypted notification against a strict allowlist before rendering, the same discipline 7.2 applies to schemas. The vault is authenticated and the record is signed, so this is not about tampering; it is that a device is a program someone wrote, and the dashboard renders whatever it says (`validateNotification`: rebuilds three members from checked values, strips controls and bidi, returns null for anything else; hostile-content test included. 7 tests, suite is 208)
 - [ ] Show which device each notification came from, by joining `DEVICE_ID` to the vault name through the existing `device-list.js` join — the server never learns the name, and a locked vault shows notifications attributed to a bare `DEVICE_ID`, the same honest degradation design 5.5 already accepts everywhere else
 - [ ] Order by `seq` within a device and by arrival time across devices, and say which is which — cross-device ordering uses the server's timestamps and is therefore only as trustworthy as the server
 
