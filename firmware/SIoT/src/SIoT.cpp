@@ -764,7 +764,7 @@ bool SIoTCommand::getText(const char *name, char *out, size_t capacity) const {
      already safe; the explicit terminator keeps it safe if that ever changes. */
   size_t length = capacity - 1;
   if (cbor_value_copy_text_string(&found, out, &length, nullptr) != CborNoError) return false;
-  out[length] = ' ';
+  out[length] = '\0';
   return true;
 }
 
@@ -811,7 +811,7 @@ bool SIoTClient::openCommand(const uint8_t *nonce, const uint8_t *sealed, size_t
       cbor_value_copy_text_string(&field, command->type_, &typeLen, nullptr) != CborNoError) {
     return false;
   }
-  command->type_[typeLen] = ' ';
+  command->type_[typeLen] = '\0';
 
   /* The args map is kept as its own encoded bytes: `ptr` before and after
      skipping it brackets exactly that item. */
