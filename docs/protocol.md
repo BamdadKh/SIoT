@@ -87,6 +87,18 @@ ed25519_seed    = HKDF-SHA256(ikm = DEVICE_SECRET, salt = "", info = "siot/devic
   private key, and the public key is its standard expansion. Not Ed25519ph, not Ed25519ctx.
   Those derive the identical public key and then fail verification, which is a bad afternoon.
 
+Two further labels exist for features a minimal port can ignore, but a device that wants
+them must use these exact strings (same rule: they are a wire format):
+
+```
+device_notify_key  = HKDF-SHA256(ikm = DEVICE_SECRET, salt = "", info = "siot/device/notify/v1",  L = 32)
+device_command_key = HKDF-SHA256(ikm = DEVICE_SECRET, salt = "", info = "siot/device/command/v1", L = 32)
+```
+
+`device_notify_key` encrypts notification records (section 6.1). `device_command_key` opens
+commands the dashboard sends to the device. A device that implements neither loses nothing:
+the labels are independent, so ignoring them cannot disturb the other two keys.
+
 `device_data_key` is the read key and is what a grant hands to another device (design 9).
 `ed25519_seed` is signing authority and never leaves the device: the browser derives the
 public half at provisioning time and zeroes the seed immediately.
@@ -192,6 +204,24 @@ and map keys sorted by length then bytes. **A device does not have to.** Nothing
 encoding, because the signature covers whatever bytes the device actually produced. It
 matters only in that the published vectors below assume it; if your encoder orders keys
 differently, your ciphertext will differ from the vector while still being perfectly valid.
+
+### 6.1 Notifications
+
+A notification is an ordinary record: same endpoint, same signature, same `seq` sequence,
+same AAD with the same constant record-type byte. Two things differ. The key is
+`device_notify_key`, and the plaintext is:
+
+```
+plaintext = CBOR { "t": <uint>, "type": "notification",
+                   "severity": "info" | "warning" | "alert" | "critical",
+                   "message": <text, at most 120 UTF-8 bytes> }
+```
+
+**Notifications and readings share one `seq` counter.** Two counters would put two records
+at the same `seq` and reuse a nonce, which is the failure the whole sequencing scheme exists
+to prevent. The record type is deliberately *not* in the AAD: an alert that the server could
+tell apart from a reading would be a labelled event log. A reader tries `device_data_key`
+first and `device_notify_key` second.
 
 Keep records small. There is a 4 KiB ceiling on `ciphertext` at the server, and a payload
 whose *length* varies with what it says is a payload whose length leaks what it says.
