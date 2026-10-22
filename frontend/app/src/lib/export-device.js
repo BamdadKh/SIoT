@@ -13,14 +13,9 @@
  * stated at the moment of the click.
  */
 
-import {
-  decryptRecord,
-  deriveDeviceDataKey,
-  deviceIdBytes,
-  deviceSecretBytes,
-  fromBase64Url,
-} from '@siot/crypto';
+import { decryptRecord, deviceIdBytes, fromBase64Url } from '@siot/crypto';
 import { fetchRecords } from './api.js';
+import { openKeyRing } from './record-keys.js';
 import {
   EXPORT_PAGE_SIZE,
   buildCsvExport,
@@ -29,7 +24,9 @@ import {
 } from './export-records.js';
 
 /**
- * @param {{ id: string, secret: string, name: string }} entry the vault's record of the device.
+ * @param {{ id: string, secret: string, name: string,
+ *           retired?: Array<{ secret: string, through_seq: string }> }} entry the vault's
+ *        record of the device; `retired` is what keeps pre-rotation records openable.
  * @param {{ format: 'json'|'csv', onProgress?: (p: { fetched: number, unopened: number }) => void,
  *           signal?: AbortSignal }} options
  * @returns {Promise<{ text: string, mime: string, extension: string, recordCount: number,
@@ -37,7 +34,8 @@ import {
  */
 export async function exportDeviceRecords(entry, { format, onProgress, signal }) {
   const idBytes = deviceIdBytes({ id: entry.id });
-  const dataKey = await deriveDeviceDataKey(deviceSecretBytes({ secret: entry.secret }));
+  // One key per secret the device has had, derived on first use (design 9.3).
+  const ring = openKeyRing(entry);
 
   try {
     const records = await collectHistory({
@@ -52,9 +50,9 @@ export async function exportDeviceRecords(entry, { format, onProgress, signal })
             ...(afterSeq === undefined ? {} : { afterSeq }),
           })
         ).records,
-      openRecord: (raw) =>
+      openRecord: async (raw) =>
         decryptRecord({
-          dataKey,
+          dataKey: await ring.keyFor(raw.seq),
           deviceId: idBytes,
           seq: BigInt(raw.seq),
           nonce: fromBase64Url(raw.nonce),
@@ -74,6 +72,6 @@ export async function exportDeviceRecords(entry, { format, onProgress, signal })
           unopened,
         };
   } finally {
-    dataKey.fill(0);
+    ring.zero();
   }
 }

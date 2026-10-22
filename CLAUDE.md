@@ -757,7 +757,12 @@ picks the recipient, states the costs design 9.2/9.3 require before anything is 
 seals B's data key under A's with `lib/crypto/grant.js`. The 7.4 layout is the schema's field
 order, reordered from Fields; the drag-and-drop grid was left unbuilt on purpose.
 
-The frontend suite is 205 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
+**Phase 8.4 is built, not run end to end.** Revoking a grant is rotating the source's
+`DEVICE_SECRET` (`RotateSecret.jsx`). The device keeps its `DEVICE_ID`; `POST /devices/:id/rotate`
+rebinds `sign_pub` (password required) and returns the `seq` boundary; the vault entry keeps
+retired secrets so history still opens. Routes now include `/grants` and `/devices/:id/rotate`.
+
+The frontend suite is 214 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
 `sequence.js`, `records.js`, `provisioning-protocol.js` and `cbor.js` are React-free so the
 suite reaches them directly, and `protocol-vectors.test.js` re-derives every published vector
 from scratch.

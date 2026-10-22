@@ -116,7 +116,7 @@ function assertBase64UrlBytes(value, expectedBytes, label) {
  */
 export function normaliseVaultDocument(contents) {
   if (contents === null || contents === undefined) {
-    return { document: emptyVaultDocument(), dropped: 0 };
+    return { document: emptyVaultDocument(), dropped: 0, schemaFieldsDropped: 0, retiredDropped: 0 };
   }
   if (typeof contents !== 'object' || Array.isArray(contents)) {
     throw new TypeError('vault contents must be an object');
@@ -127,28 +127,87 @@ export function normaliseVaultDocument(contents) {
   const seen = new Set();
   let dropped = 0;
   let schemaFieldsDropped = 0;
+  let retiredDropped = 0;
 
   for (const entry of raw) {
     try {
-      const { device, schemaDropped } = normaliseDeviceEntry(entry);
+      const { device, schemaDropped, retiredDropped: retiredBad } = normaliseDeviceEntry(entry);
       // `DEVICE_ID` is the key everywhere (design 5.5); two entries claiming one
       // is a bug that would otherwise silently shadow whichever came second.
       if (seen.has(device.id)) throw new Error('duplicate DEVICE_ID');
       seen.add(device.id);
       devices.push(device);
       schemaFieldsDropped += schemaDropped;
+      retiredDropped += retiredBad;
     } catch {
       dropped += 1;
     }
   }
 
-  return { document: { v: VAULT_DOCUMENT_VERSION, devices }, dropped, schemaFieldsDropped };
+  return {
+    document: { v: VAULT_DOCUMENT_VERSION, devices },
+    dropped,
+    schemaFieldsDropped,
+    retiredDropped,
+  };
+}
+
+/** The largest `seq` there is: it is a uint64 (design 7.3). */
+const UINT64_MAX = (1n << 64n) - 1n;
+
+/**
+ * @param {unknown} value
+ * @returns {string} the value, confirmed to be a canonical decimal uint64.
+ */
+function assertThroughSeq(value) {
+  if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) {
+    throw new TypeError('through_seq must be a decimal string');
+  }
+  if (BigInt(value) > UINT64_MAX) {
+    throw new RangeError('through_seq exceeds uint64');
+  }
+  return value;
+}
+
+/**
+ * Reads the retired-secret list, tolerant per item. A bad item is dropped and
+ * counted rather than failing the entry, for the same reason a bad schema field
+ * is: the current `secret` is the only key that opens new records and losing it
+ * over a damaged history would be absurd. Sorted by boundary so `secretForSeq`
+ * can take the first match without trusting stored order.
+ *
+ * @param {unknown} raw
+ * @returns {{ retired: Array<{ secret: string, through_seq: string }>, dropped: number }}
+ */
+function normaliseRetired(raw) {
+  if (raw === undefined) return { retired: [], dropped: 0 };
+  if (!Array.isArray(raw)) return { retired: [], dropped: 1 };
+  const retired = [];
+  let dropped = 0;
+  for (const item of raw) {
+    try {
+      if (typeof item !== 'object' || item === null) throw new TypeError('not an object');
+      retired.push({
+        secret: assertBase64UrlBytes(item.secret, DEVICE_SECRET_BYTES, 'retired DEVICE_SECRET'),
+        through_seq: assertThroughSeq(item.through_seq),
+      });
+    } catch {
+      dropped += 1;
+    }
+  }
+  retired.sort((a, b) => {
+    const x = BigInt(a.through_seq);
+    const y = BigInt(b.through_seq);
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+  return { retired, dropped };
 }
 
 /**
  * @param {unknown} entry
  * @returns {{ device: { id: string, secret: string, name: string, added_at: string,
- *             schema?: object }, schemaDropped: number }}
+ *             schema?: object, retired?: Array<{ secret: string, through_seq: string }>,
+ *             pending?: string }, schemaDropped: number, retiredDropped: number }}
  */
 function normaliseDeviceEntry(entry) {
   if (typeof entry !== 'object' || entry === null) {
@@ -164,7 +223,21 @@ function normaliseDeviceEntry(entry) {
   // schemas existed reads back exactly as it was written.
   const { schema, dropped } = normaliseSchema(entry.schema);
   if (schema) device.schema = schema;
-  return { device, schemaDropped: dropped };
+
+  // Absent rather than empty for the same reason: an entry that was never
+  // rotated reads back exactly as it was written.
+  const { retired, dropped: retiredDropped } = normaliseRetired(entry.retired);
+  if (retired.length > 0) device.retired = retired;
+  let pendingBad = 0;
+  if (entry.pending !== undefined) {
+    try {
+      device.pending = assertBase64UrlBytes(entry.pending, DEVICE_SECRET_BYTES, 'pending DEVICE_SECRET');
+    } catch {
+      // A pending secret that will not parse was never usable; counted, not fatal.
+      pendingBad = 1;
+    }
+  }
+  return { device, schemaDropped: dropped, retiredDropped: retiredDropped + pendingBad };
 }
 
 /**
@@ -273,6 +346,126 @@ export function setDeviceSchema(doc, deviceId, fields) {
       return schema ? { ...rest, schema } : rest;
     }),
   };
+}
+
+/**
+ * Step (a) of a secret rotation (design 9.3): park a freshly generated secret on
+ * the entry as `pending`, leaving `secret` untouched. The old secret stays the
+ * one that reads and (until the server rebinds) the one that is registered, so
+ * a failure anywhere after this loses nothing.
+ *
+ * Calling it again with the *same* bytes is a no-op (a retry after a lost
+ * response). Different bytes replace the pending secret: a caller that already
+ * rebound the server must reuse the stored pending rather than mint again.
+ * Setting it equal to the current secret is refused: that rotates nothing.
+ *
+ * @param {{ devices: Array }} doc
+ * @param {string} deviceId base64url
+ * @param {Uint8Array} secretBytes 32 bytes
+ */
+export function setPendingSecret(doc, deviceId, secretBytes) {
+  const entry = findDevice(doc, deviceId);
+  if (!entry) {
+    throw new Error('no such device in the vault');
+  }
+  if (!(secretBytes instanceof Uint8Array) || secretBytes.length !== DEVICE_SECRET_BYTES) {
+    throw new TypeError(`DEVICE_SECRET must be ${DEVICE_SECRET_BYTES} bytes`);
+  }
+  const pending = toBase64Url(secretBytes);
+  if (pending === entry.secret) {
+    throw new Error('the pending secret is the current secret');
+  }
+  if (entry.pending === pending) return doc;
+
+  return {
+    ...doc,
+    v: VAULT_DOCUMENT_VERSION,
+    devices: listDevices(doc).map((device) =>
+      device.id === deviceId ? { ...device, pending } : device,
+    ),
+  };
+}
+
+/**
+ * Step (c) of a rotation: the server has rebound the device and said every record
+ * it accepted under the old key has `seq <= throughSeq`. The old secret moves to
+ * `retired` with that boundary (old records stay readable forever), the pending
+ * secret becomes `secret`, and `pending` goes away. Name, schema and `added_at`
+ * ride through untouched.
+ *
+ * Idempotency: if `pending` already equals `secret` (a stale copy of the entry
+ * re-applied after a promote landed) the marker is cleared and nothing is
+ * appended, so a retry never creates a second retired entry. If the promote
+ * already completed outright there is no `pending` and this throws; a caller
+ * that lost the response reloads the vault and finds the work done.
+ *
+ * A boundary lower than the last retired one is a bug, not data: rotations
+ * happen in order, so boundaries only move forward. An equal boundary is allowed
+ * (a rotation with no uploads in between).
+ *
+ * @param {{ devices: Array }} doc
+ * @param {string} deviceId base64url
+ * @param {string} throughSeq uint64 as a decimal string
+ */
+export function promotePendingSecret(doc, deviceId, throughSeq) {
+  const entry = findDevice(doc, deviceId);
+  if (!entry) {
+    throw new Error('no such device in the vault');
+  }
+  if (entry.pending === undefined) {
+    throw new Error('no pending secret to promote');
+  }
+  const boundary = assertThroughSeq(throughSeq);
+
+  if (entry.pending === entry.secret) {
+    return {
+      ...doc,
+      v: VAULT_DOCUMENT_VERSION,
+      devices: listDevices(doc).map((device) => {
+        if (device.id !== deviceId) return device;
+        // eslint-disable-next-line no-unused-vars -- dropping the marker is the point
+        const { pending: _pending, ...rest } = device;
+        return rest;
+      }),
+    };
+  }
+
+  const retired = entry.retired ?? [];
+  const last = retired[retired.length - 1];
+  if (last && BigInt(boundary) < BigInt(last.through_seq)) {
+    throw new RangeError('through_seq is lower than the last retired boundary');
+  }
+
+  return {
+    ...doc,
+    v: VAULT_DOCUMENT_VERSION,
+    devices: listDevices(doc).map((device) => {
+      if (device.id !== deviceId) return device;
+      const { pending, ...rest } = device;
+      return {
+        ...rest,
+        secret: pending,
+        retired: [...retired, { secret: device.secret, through_seq: boundary }],
+      };
+    }),
+  };
+}
+
+/**
+ * Which stored secret covers a record at `seq`: the first retired secret whose
+ * boundary is at or above it, else the current one. Strings in and out;
+ * comparison is BigInt because `seq` overflows a double.
+ *
+ * @param {{ secret: string, retired?: Array<{ secret: string, through_seq: string }> }} entry normalised
+ * @param {string} seq uint64 as a decimal string
+ * @returns {string} base64url secret as stored
+ */
+export function secretForSeq(entry, seq) {
+  const target = BigInt(seq);
+  for (const item of entry.retired ?? []) {
+    if (target <= BigInt(item.through_seq)) return item.secret;
+  }
+  return entry.secret;
 }
 
 /**

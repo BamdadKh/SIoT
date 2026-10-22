@@ -130,9 +130,10 @@ function Opened({ state, onLoadOlder, schema }) {
             actually has. A record refuses for one of four reasons and they are not distinguishable
             from here: a different key, a blob that was altered, a record moved to another
             device&rsquo;s identifier, or a nonce that disagrees with the sequence position it
-            claims. Re-provisioning this device with a new{' '}
-            <span className="mono">DEVICE_SECRET</span> makes everything before it read exactly like
-            this, permanently, and is the ordinary explanation.
+            claims. The ordinary explanation is a board given a new{' '}
+            <span className="mono">DEVICE_SECRET</span> outside this app, which leaves everything
+            before it reading exactly like this, permanently. Rotating the secret here does not:
+            the old one is kept for the records it sealed.
           </span>
         </p>
       ) : null}

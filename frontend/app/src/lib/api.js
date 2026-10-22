@@ -243,3 +243,20 @@ export function createGrant({ deviceAId, deviceBId, ciphertext }) {
 export function fetchDeviceGrants(deviceId) {
   return request('GET', `/devices/${encodeURIComponent(deviceId)}/grants`);
 }
+
+/**
+ * Rebinds a device to the `sign_pub` of a rotated `DEVICE_SECRET` (design 9.3).
+ * The server re-verifies `current_login_key` (403 if wrong, 404 for a device that
+ * is not the caller's) and answers with the boundary: every record accepted under
+ * the old key has `seq <= through_seq`. Safe to retry after a lost response.
+ *
+ * @param {string} deviceId base64url
+ * @param {{ signPub: string, currentLoginKey: string }} keys both base64url
+ * @returns {Promise<{ through_seq: string }>} decimal string, never a Number.
+ */
+export function rotateDeviceKey(deviceId, { signPub, currentLoginKey }) {
+  return request('POST', `/devices/${encodeURIComponent(deviceId)}/rotate`, {
+    sign_pub: signPub,
+    current_login_key: currentLoginKey,
+  });
+}

@@ -3,6 +3,7 @@ import { ApiError } from '../lib/api.js';
 import { findReaders, grantReadAccess } from '../lib/grant-access.js';
 import { PAIRED } from '../lib/device-list.js';
 import { Choice } from './Choice.jsx';
+import { Link } from '../lib/router.jsx';
 
 /**
  * Letting another device read this one (design Section 9, roadmap 8.1).
@@ -102,6 +103,26 @@ export function GrantAccess({ device, entry, devices, findEntry }) {
 
       <div className="stack stack-4">
         <Readers readers={readers} nameOf={nameOf} />
+
+        {/* Revoking is rotation (design 9.3), and it has its own screen because
+            it needs the board. Offered here whatever the readers, since rotating
+            is also the remedy for a secret that may have been copied. */}
+        {readers.status === 'ok' ? (
+          <p className="small">
+            {readers.readers.length > 0 ? (
+              <>
+                A grant cannot be withdrawn, only outrun: to stop{' '}
+                {readers.readers.length === 1 ? 'that device' : 'them'} reading what this one sends
+                next,{' '}
+              </>
+            ) : (
+              <>If this device&rsquo;s secret may have been copied, </>
+            )}
+            <Link to={`/device/${device.id}/rotate`} className="button button-link">
+              rotate its secret
+            </Link>
+          </p>
+        ) : null}
 
         {granted ? (
           <p className="success" role="status">

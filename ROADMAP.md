@@ -1121,8 +1121,38 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 - [ ] Test: A can read B's historical + live records without any always-on relay
 
 ### 8.4 Revocation flow
-- [ ] UI messaging: "revoke" = rotate B's `DEVICE_SECRET` via re-provisioning, old data stays readable by A forever
-- [ ] Re-provisioning flow reuses the Phase 4 tool with a new `DEVICE_SECRET`, updates vault entry, old grants naturally stop covering new data — the device's name should survive the rotation, since it is the same physical thing in the same place
+- [x] UI messaging: "revoke" = rotate B's `DEVICE_SECRET` via re-provisioning, old data stays readable by A forever
+      The Grants section says a grant "cannot be withdrawn, only outrun" and links to rotation
+      (also offered with no grantees, as the remedy for a secret that may have been copied).
+      The rotation screen names each grantee and states that it keeps everything up to now and
+      reads nothing after, before anything is sent
+- [x] Re-provisioning flow reuses the Phase 4 tool with a new `DEVICE_SECRET`, updates vault entry, old grants naturally stop covering new data — the device's name should survive the rotation, since it is the same physical thing in the same place
+      `screens/RotateSecret.jsx` at `/device/<id>/rotate`, a `Plate` reusing the Phase 4 serial
+      session. **Decided: the device keeps its `DEVICE_ID`**, so name, fields and grant rows
+      stay attached, and the server rebinds the row's `sign_pub` with the new
+      `POST /devices/:id/rotate`, which answers `through_seq`: every record accepted under the old
+      key is at or below it. That route **requires the account password**, the way
+      `/change-password` does and on its throttle: a session alone would let a cookie thief
+      who also controls a grantee (which holds the data key, never the signing key) rebind the
+      signing slot and forge records that decrypt, the exact thing the 5.1 split prevents.
+      `POST /records`' compare-and-swap now also requires the `sign_pub` it verified against,
+      so a rotation and an upload serialize on the row and no old-key record lands above the
+      boundary. The vault entry keeps each retired secret with its `through_seq`
+      (`retired`), and Readings and the export pick the key per `seq` (`secretForSeq`,
+      `app/src/lib/record-keys.js`), so the owner's history stays readable. Order, chosen by
+      what each failure leaves: new secret into the vault as `pending`, rebind, promote, write
+      the board; a retry reuses a pending secret rather than minting another, and a failed
+      board write offers "Write to board again". Only the board the device already runs on is
+      accepted (a blank or foreign board is refused, no override): a different board restarts
+      its sequence below what the server has accepted. Rotation without a board (for
+      revealed-credential hardware) is not built. 9 new tests in
+      `test/device-rotation.test.js`
+
+> **Not run end to end.** Docker was not running, so neither the route nor the screen has
+> touched a server; the backend typechecks, and the screen was looked at with fixed props,
+> which caught it claiming "no device holds a grant" when the check had merely failed. A board
+> is needed for the write. 8.3 firmware consuming grants should try every grant row for a
+> source, newest first: after a rotation there is one per key epoch.
 
 > 8.1, 8.3, and 8.4 are `frontend/app/` and Phase 5 firmware work (grant creation UI,
 > device-side grant consumption, re-provisioning UI) and were left for sessions that touch

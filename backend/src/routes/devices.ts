@@ -17,9 +17,18 @@ import {
   encodeBase64Url,
 } from '../lib/base64url.js';
 import { httpError, isUniqueViolation } from '../lib/http-error.js';
+import { verifyLoginKey } from '../lib/login-key.js';
+import {
+  addressThrottle,
+  changePasswordThrottle,
+  checkThrottles,
+  clearThrottle,
+  registerFailure,
+} from '../lib/rate-limit.js';
 import { parseSeq, SeqString } from '../lib/seq.js';
 import {
   DEVICE_ID_BYTES,
+  LOGIN_KEY_BYTES,
   NONCE_BYTES,
   RECORD_CIPHERTEXT_MAX_BYTES,
   RECORD_CIPHERTEXT_MIN_BYTES,
@@ -43,6 +52,19 @@ const RegisterDeviceBody = Type.Object(
 const RegisterDeviceResponse = Type.Object({
   device_id: DeviceId,
 });
+
+const RotateDeviceBody = Type.Object(
+  {
+    sign_pub: Base64UrlBytes(SIGN_PUB_BYTES, 'Ed25519 device_sign_pub derived from the new secret'),
+    current_login_key: Base64UrlBytes(
+      LOGIN_KEY_BYTES,
+      'HKDF(current master_key, "siot/auth/v1")',
+    ),
+  },
+  { additionalProperties: false },
+);
+
+const RotateDeviceResponse = Type.Object({ through_seq: SeqString });
 
 const DeviceListResponse = Type.Object({
   devices: Type.Array(
@@ -223,6 +245,91 @@ export const deviceRoutes: FastifyPluginAsyncTypebox = async (app) => {
       if (deleted.rowCount === 0) throw httpError(404, 'unknown device_id');
 
       return reply.code(204).send(null);
+    },
+  );
+
+  /**
+   * Rebinds a device to a new `sign_pub` after its `DEVICE_SECRET` is rotated
+   * (design 9.3, roadmap 8.4). The device keeps its `DEVICE_ID`; a new secret
+   * yields a new signing key; this route is where the server learns it.
+   *
+   * **Why the password is required on top of the session.** A session alone
+   * would let a cookie thief who also controls a device holding a read grant on
+   * this one (it has the data key but never the signing key, design 9.1) rebind
+   * `sign_pub` to a key they hold and then forge records that decrypt
+   * correctly. Keeping the signing key out of every reader's hands is exactly
+   * what the 5.1 key split is for, and an unauthenticated rebind would undo it.
+   * So the check is the one `POST /change-password` makes: the same Argon2id
+   * verify of `current_login_key`, the same 403, and the same per-user
+   * throttle bucket. Sharing the bucket is deliberate: both routes are
+   * "prove the password with a live session in hand", so guesses against either
+   * must spend one budget, or the second route would double an attacker's tries.
+   *
+   * **`through_seq`** is the `last_seq` the row held at the instant of the
+   * rebind: every record accepted under the old key has `seq <= through_seq`,
+   * and none can land above it afterwards because `POST /records` makes its
+   * `last_seq` swap conditional on `sign_pub` too (see records.ts). For a device
+   * that never uploaded it is "0": `last_seq` defaults to 0 and a record needs
+   * `seq > last_seq`, so "0" means nothing was accepted under the old key.
+   *
+   * Idempotent: repeating with the same `sign_pub` rewrites the same value and
+   * returns the current `last_seq`, which is the same boundary unless a record
+   * under the new key has landed since. A client retrying after a lost response
+   * is therefore safe.
+   *
+   * One statement with the owner check in the `where` clause, as in DELETE.
+   * 404 for "not yours" and "does not exist" alike.
+   */
+  app.post(
+    '/devices/:device_id/rotate',
+    {
+      schema: {
+        params: RecordsParams,
+        body: RotateDeviceBody,
+        response: { 200: RotateDeviceResponse },
+      },
+    },
+    async (req) => {
+      const userId = req.session!.userId;
+
+      const throttles = [changePasswordThrottle(userId), addressThrottle(req.ip)];
+      const throttle = await checkThrottles(app.redis, throttles);
+      if (!throttle.allowed) {
+        throw httpError(429, `too many attempts, try again in ${throttle.retryAfterSeconds}s`);
+      }
+
+      const user = await app.pg.queryOne<{ login_key_hash: string }>(
+        'select login_key_hash from users where id = $1',
+        [userId],
+      );
+      if (!user) throw httpError(401, 'authentication required');
+
+      const currentLoginKey = decodeBase64Url(req.body.current_login_key, LOGIN_KEY_BYTES);
+      let verified: boolean;
+      try {
+        verified = await verifyLoginKey(user.login_key_hash, currentLoginKey);
+      } finally {
+        currentLoginKey.fill(0);
+      }
+      if (!verified) {
+        await registerFailure(app.redis, throttles);
+        throw httpError(403, 'current password is incorrect');
+      }
+      await clearThrottle(app.redis, throttles[0]);
+
+      const deviceId = decodeBase64Url(req.params.device_id, DEVICE_ID_BYTES);
+      const signPub = decodeBase64Url(req.body.sign_pub, SIGN_PUB_BYTES);
+
+      const rebound = await app.pg.queryOne<{ last_seq: string }>(
+        `update devices
+            set sign_pub = $1
+          where device_id = $2 and owner_user_id = $3
+      returning last_seq`,
+        [signPub, deviceId, userId],
+      );
+      if (!rebound) throw httpError(404, 'unknown device_id');
+
+      return { through_seq: rebound.last_seq };
     },
   );
 

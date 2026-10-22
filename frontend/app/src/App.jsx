@@ -8,6 +8,7 @@ import { Unlock } from './screens/Unlock.jsx';
 import { Devices } from './screens/Devices.jsx';
 import { AddDevice } from './screens/AddDevice.jsx';
 import { DeviceDetail } from './screens/DeviceDetail.jsx';
+import { RotateSecret } from './screens/RotateSecret.jsx';
 import { ChangePassword } from './screens/ChangePassword.jsx';
 
 /**
@@ -18,6 +19,7 @@ import { ChangePassword } from './screens/ChangePassword.jsx';
  * `/password` already exist to avoid.
  */
 const DEVICE_ROUTE = '/device/';
+const ROTATE_SUFFIX = '/rotate';
 
 /**
  * Which screen to show is decided by two independent facts, not one:
@@ -94,7 +96,11 @@ export function App() {
 
   if (path === '/password') {
     return (
-      <ChangePassword username={session.username} onSignOut={handleSignOut} signingOut={signingOut} />
+      <ChangePassword
+        username={session.username}
+        onSignOut={handleSignOut}
+        signingOut={signingOut}
+      />
     );
   }
 
@@ -114,7 +120,20 @@ export function App() {
     // segment is the id verbatim. A trailing slash is dropped rather than being
     // treated as part of the identifier, since it comes from a person editing
     // the address bar and means the same page.
-    const deviceId = path.slice(DEVICE_ROUTE.length).replace(/\/+$/, '');
+    const rest = path.slice(DEVICE_ROUTE.length).replace(/\/+$/, '');
+    // `/device/<id>/rotate` is the one screen below a device. A `DEVICE_ID` is
+    // base64url and holds no slash, so the split cannot be ambiguous.
+    if (rest.endsWith(ROTATE_SUFFIX)) {
+      return (
+        <RotateSecret
+          username={session.username}
+          deviceId={rest.slice(0, -ROTATE_SUFFIX.length)}
+          onSignOut={handleSignOut}
+          signingOut={signingOut}
+        />
+      );
+    }
+    const deviceId = rest;
     return (
       <DeviceDetail
         username={session.username}
@@ -125,7 +144,5 @@ export function App() {
     );
   }
 
-  return (
-    <Devices username={session.username} onSignOut={handleSignOut} signingOut={signingOut} />
-  );
+  return <Devices username={session.username} onSignOut={handleSignOut} signingOut={signingOut} />;
 }

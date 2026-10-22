@@ -92,6 +92,17 @@ export const recordRoutes: FastifyPluginAsyncTypebox = async (app) => {
       }
 
       await app.pg.transaction(async (tx) => {
+        // `sign_pub = $3` is what serializes this against POST
+        // /devices/:id/rotate. The signature was verified above against a
+        // `sign_pub` read outside this statement; without this predicate a
+        // rotation committing in between would let an old-key record land with
+        // a seq above the `through_seq` the client was told. Both statements
+        // update the same device row, so they queue on its lock, and under
+        // READ COMMITTED the loser re-evaluates its `where` against the
+        // winner's committed row: either this record commits first and the
+        // rotation reports its seq, or the rotation commits first and this
+        // swap matches nothing.
+        //
         // Check 2: seq > last_seq[device_id], as a single-statement
         // compare-and-swap rather than a read-then-write — same reasoning as
         // the vault_version CAS in `vault.ts`. Two uploads racing for the same
@@ -99,12 +110,21 @@ export const recordRoutes: FastifyPluginAsyncTypebox = async (app) => {
         const bumped = await tx.query<{ last_seq: string }>(
           `update devices
               set last_seq = $2, last_seen_at = now()
-            where device_id = $1 and last_seq < $2
+            where device_id = $1 and last_seq < $2 and sign_pub = $3
         returning last_seq`,
-          [deviceId, seq.toString()],
+          [deviceId, seq.toString(), device.sign_pub],
         );
 
         if (bumped.rowCount === 0) {
+          // Tell a key rotated out from under us apart from a plain stale seq.
+          const current = await tx.query<{ sign_pub: Buffer }>(
+            'select sign_pub from devices where device_id = $1',
+            [deviceId],
+          );
+          if (current.rowCount === 0) throw httpError(404, 'unknown device_id');
+          if (!current.rows[0]!.sign_pub.equals(device.sign_pub)) {
+            throw httpError(401, 'signature does not verify against the registered sign_pub');
+          }
           throw httpError(409, `seq ${seq} is not greater than this device's last recorded seq`);
         }
 

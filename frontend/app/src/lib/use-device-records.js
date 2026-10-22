@@ -6,8 +6,10 @@
  * of the vault entry the same browser sealed at provisioning time. Nothing here
  * asks the server for anything but blobs, and nothing here sends it anything.
  *
- * **The key is derived once per page and zeroed when the page is done.**
- * `device_data_key` is HKDF over the `DEVICE_SECRET` the vault holds, and it is
+ * **Keys are derived once per page and zeroed when the page is done.**
+ * `device_data_key` is HKDF over a `DEVICE_SECRET` the vault holds, and a rotated
+ * device holds several: each record opens under the secret `secretForSeq` picks
+ * for its `seq` (design 9.3), each distinct secret derived at most once. They are
  * not kept between pages: a key that lives as long as the screen does is a key
  * sitting in memory through every idle minute someone leaves this tab open.
  * Zeroing it is best effort in a garbage-collected runtime, the same caveat
@@ -32,14 +34,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  decryptRecord,
-  deriveDeviceDataKey,
-  deviceIdBytes,
-  deviceSecretBytes,
-  fromBase64Url,
-} from '@siot/crypto';
+import { decryptRecord, deviceIdBytes, fromBase64Url } from '@siot/crypto';
 import { fetchRecords } from './api.js';
+import { openKeyRing } from './record-keys.js';
 import { RECORDS_PAGE_SIZE } from './records.js';
 
 /**
@@ -69,7 +66,9 @@ export function useDeviceRecords(entry) {
   }, []);
 
   const deviceId = entry.id;
-  const secret = entry.secret;
+  // Retired secrets change what opens a record, so they are part of the identity
+  // of this effect; serialised so a re-render with equal contents does not refetch.
+  const secretsKey = JSON.stringify([entry.secret, entry.retired ?? []]);
 
   /**
    * Fetches one page and opens it. Ascending `seq` within the page, whichever
@@ -78,7 +77,8 @@ export function useDeviceRecords(entry) {
   const openPage = useCallback(
     async (beforeSeq) => {
       const idBytes = deviceIdBytes({ id: deviceId });
-      const dataKey = await deriveDeviceDataKey(deviceSecretBytes({ secret }));
+      const [secret, retired] = JSON.parse(secretsKey);
+      const ring = openKeyRing({ secret, retired });
 
       try {
         const { records: raw } = await fetchRecords(deviceId, {
@@ -93,7 +93,7 @@ export function useDeviceRecords(entry) {
           const seq = BigInt(record.seq);
           try {
             const payload = await decryptRecord({
-              dataKey,
+              dataKey: await ring.keyFor(record.seq),
               deviceId: idBytes,
               seq,
               nonce: fromBase64Url(record.nonce),
@@ -113,10 +113,10 @@ export function useDeviceRecords(entry) {
         // A short page means the server had nothing more before the cursor.
         return { opened, exhausted: raw.length < RECORDS_PAGE_SIZE };
       } finally {
-        dataKey.fill(0);
+        ring.zero();
       }
     },
-    [deviceId, secret],
+    [deviceId, secretsKey],
   );
 
   const reload = useCallback(async () => {
@@ -135,7 +135,7 @@ export function useDeviceRecords(entry) {
       if (!mounted.current) return;
       setState({ status: 'error', message: failure.message });
     }
-  }, [deviceId, secret, openPage]);
+  }, [deviceId, secretsKey, openPage]);
 
   /*
    * Reads `state` directly rather than through a `setState` updater. An updater
