@@ -1080,10 +1080,28 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 ## Phase 8 — Inter-Device Grants
 
 ### 8.1 Grant creation — client
-- [ ] UI: pick Device A (granted) and Device B (source), with an explicit warning that this grants access to B's full history, past and future, and that revocation only affects future data
-- [ ] Decrypt `device_B_data_key` from vault
-- [ ] Re-encrypt it under `device_A_data_key` with AAD `"grant/v1" || DEVICE_ID_A || DEVICE_ID_B`
-- [ ] Upload grant blob
+- [x] UI: pick Device A (granted) and Device B (source), with an explicit warning that this grants access to B's full history, past and future, and that revocation only affects future data
+      A Grants section on B's own device page (`components/GrantAccess.jsx`), so B is the page
+      and only A is picked, from the account's other paired devices. Shaped like Delete: not
+      armed by default, "Review the grant" arms it, choosing a different recipient disarms it.
+      The armed panel names both devices and states, above the button, that the whole history
+      is opened, that there is no revoking short of re-provisioning B (and the past stays
+      readable regardless), and that A gets read access only, never B's signing key. The
+      section also lists which devices already hold a grant on B, by asking
+      `GET /devices/:id/grants` of each other paired device (the server already knows this,
+      design 13.1)
+- [x] Decrypt `device_B_data_key` from vault
+      Derived from B's `DEVICE_SECRET` as raw bytes (`deriveDeviceDataKey` already returns
+      them), zeroed once sealed, in `app/src/lib/grant-access.js`
+- [x] Re-encrypt it under `device_A_data_key` with AAD `"grant/v1" || DEVICE_ID_A || DEVICE_ID_B`
+      `lib/crypto/grant.js` (`sealGrant`/`openGrant`), 60 bytes as nonce || ct || tag, matching
+      the server's `GRANT_BLOB_BYTES`. `test/grant.test.js`, 9 cases, including that the opened
+      key decrypts a record B sealed. `docs/protocol.md` describes the blob for 8.3 firmware
+- [x] Upload grant blob
+      `createGrant` in `api.js`; `/grants` added to `API_PATHS`
+
+> Walked against fixed props (picker, armed panel, way out), not against a server: the grant
+> has not been created end to end from this screen, same gap as 7.1's save.
 
 ### 8.2 Grant storage — server
 - [x] `grants` table: id, device_a_id, device_b_id, ciphertext, created_at — migration `1785650000000_grants.js`. Deliberately **no** uniqueness constraint on `(device_a_id, device_b_id)`: design 9.3 says old data must stay readable by A forever, which depends on A being able to fetch the grant that wrapped the *old* `device_B_data_key` after B rotates; upserting on re-grant would destroy that row. Multiple grants per pair, one per key epoch, newest first

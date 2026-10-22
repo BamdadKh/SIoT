@@ -18,6 +18,7 @@ import { Field } from '../components/Field.jsx';
 import { RollbackWarning } from '../components/RollbackWarning.jsx';
 import { OrphanNote, UnregisteredNote } from '../components/DeviceStateNote.jsx';
 import { RevealCredentials } from '../components/RevealCredentials.jsx';
+import { GrantAccess } from '../components/GrantAccess.jsx';
 import { EraseBoard } from '../components/EraseBoard.jsx';
 import { DeviceDashboard } from '../components/DeviceDashboard.jsx';
 import { DeviceReadings, readRecord } from '../components/DeviceReadings.jsx';
@@ -164,6 +165,16 @@ function Found({ username, deviceId, state, reload, onDeleted }) {
       {entry ? (
         <>
           <RenameSection username={username} device={device} reload={reload} />
+          {/* Both halves are needed on both sides: the server checks it owns
+              both rows, and sealing needs both secrets from the vault. */}
+          {device.state === PAIRED ? (
+            <GrantAccess
+              device={device}
+              entry={entry}
+              devices={state.devices}
+              findEntry={(id) => findDevice(state.document, id) ?? null}
+            />
+          ) : null}
           <RevealCredentials device={device} entry={entry} />
         </>
       ) : null}

@@ -213,3 +213,33 @@ export async function deleteDevice(deviceId) {
 export function changePassword(body) {
   return request('POST', '/change-password', body);
 }
+
+/**
+ * Stores a grant: `device_B_data_key` sealed under `device_A_data_key`, opaque to
+ * the server. The caller must own both devices; otherwise the server answers 403
+ * (surfaced as an `ApiError` with `status` 403), and 400 for a malformed field.
+ * Grants are additive, so repeating a call adds a row rather than replacing one.
+ *
+ * @param {{ deviceAId: string, deviceBId: string, ciphertext: string }} grant
+ *        every value base64url; `ciphertext` is the 60-byte `sealGrant` output.
+ */
+export function createGrant({ deviceAId, deviceBId, ciphertext }) {
+  return request('POST', '/grants', {
+    device_a_id: deviceAId,
+    device_b_id: deviceBId,
+    ciphertext,
+  });
+}
+
+/**
+ * Every grant naming a device as the recipient (design 9.3). The route is public
+ * because the recipient's own firmware polls it with no session; the browser
+ * uses it to show which devices already hold a given device's key.
+ *
+ * @param {string} deviceId base64url, the recipient (device A).
+ * @returns {Promise<{ grants: Array<{ device_b_id: string, ciphertext: string,
+ *                                     created_at: string }> }>}
+ */
+export function fetchDeviceGrants(deviceId) {
+  return request('GET', `/devices/${encodeURIComponent(deviceId)}/grants`);
+}

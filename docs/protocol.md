@@ -288,6 +288,24 @@ A device that has been *granted* another device's data reads `GET /siot/devices/
 instead, which is public because a device holds no session (design 9.3). That is Phase 8 and
 is out of scope for this document.
 
+### Grant blobs
+
+A grant lets Device A read Device B's records. It is `device_B_data_key` (the 32 bytes of
+Section 2, never the signing seed) sealed under `device_A_data_key`:
+
+```
+blob (60B) = nonce (12B, random) || AES-256-GCM ciphertext (32B) || tag (16B)
+AAD        = utf8("grant/v1") || DEVICE_ID_A (16B) || DEVICE_ID_B (16B)
+```
+
+The ids are bound in that order, so a blob does not open as (B, A) and cannot be replayed
+as a grant between another pair. A device that cannot open a blob under its own key and the
+AAD above MUST discard it and MUST NOT retry it. The nonce is random rather than a counter
+because one `device_A_data_key` seals one grant per pairing, far below the birthday bound.
+When B's `DEVICE_SECRET` rotates there is a new grant; keep the old ones, each opens a
+different slice of B's history. No published vector yet: the unit tests in
+`frontend/test/grant.test.js` are the reference.
+
 ---
 
 ## 9. What a port must supply for itself

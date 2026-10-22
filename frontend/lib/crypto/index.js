@@ -36,6 +36,7 @@ export {
   DEVICE_ID_BYTES,
   DEVICE_SECRET_BYTES,
 } from './device.js';
+export { sealGrant, openGrant, GRANT_AAD_LABEL, GRANT_BLOB_BYTES } from './grant.js';
 export { encodeCbor, decodeCbor } from './cbor.js';
 export {
   composeSeq,

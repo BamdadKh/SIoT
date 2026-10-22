@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   buildSchema,
   setDeviceSchema,
@@ -11,6 +11,7 @@ import {
 import { ApiError } from '../lib/api.js';
 import { loadVault, storeVault, VaultRollbackError } from '../lib/vault-store.js';
 import { Field } from './Field.jsx';
+import { Choice } from './Choice.jsx';
 
 /** What each type is called on screen. The stored names are the allowlist's. */
 const TYPE_LABELS = { number: 'Number', boolean: 'On or off', text: 'Text' };
@@ -322,31 +323,6 @@ function FieldRow({ row, disabled, onMoveUp, onMoveDown, onChange, onRemove }) {
         ) : null}
       </div>
     </li>
-  );
-}
-
-/** A labelled `<select>`, built the way `Field` is: the label always rendered. */
-function Choice({ label, value, options, onChange, disabled }) {
-  const id = useId();
-  return (
-    <div className="field">
-      <label className="field-label" htmlFor={id}>
-        {label}
-      </label>
-      <select
-        id={id}
-        className="field-input field-select"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-      >
-        {options.map(([optionValue, optionLabel]) => (
-          <option key={optionValue} value={optionValue}>
-            {optionLabel}
-          </option>
-        ))}
-      </select>
-    </div>
   );
 }
 

@@ -30,6 +30,7 @@ const API_PATHS = [
   '/vault',
   '/change-password',
   '/devices',
+  '/grants',
 ];
 
 /**

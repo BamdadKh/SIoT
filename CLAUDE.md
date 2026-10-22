@@ -752,7 +752,12 @@ what each panel may claim. Graphs are spaced by record rather than by time and b
 restarts and unopenable records; gauges say when a value is off the dial; a toggle shows state and
 cannot be pressed until 11.5. Every value is "the newest this browser has seen", dated by arrival.
 
-The frontend suite is 196 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
+**Phase 8.1 is done: grants are created from the source device's page.** `GrantAccess.jsx`
+picks the recipient, states the costs design 9.2/9.3 require before anything is sent, and
+seals B's data key under A's with `lib/crypto/grant.js`. The 7.4 layout is the schema's field
+order, reordered from Fields; the drag-and-drop grid was left unbuilt on purpose.
+
+The frontend suite is 205 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
 `sequence.js`, `records.js`, `provisioning-protocol.js` and `cbor.js` are React-free so the
 suite reaches them directly, and `protocol-vectors.test.js` re-derives every published vector
 from scratch.
