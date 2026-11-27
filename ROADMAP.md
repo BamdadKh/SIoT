@@ -1187,9 +1187,19 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 - [ ] Decide: backup pin, intermediate pinning, or accepted re-provisioning (Section 15.1)
 - [ ] Implement chosen approach in firmware library
 
-### 9.4 Metadata mitigation (optional per device class)
-- [ ] Evaluate fixed-interval + padded dummy records for privacy-sensitive device types
-- [ ] Implement opt-in if any device class warrants it
+### 9.4 Constant-rate uploads (optional per device)
+
+> Design 13.2. A setting that hides packet timing from the server: the device sends a constant
+> stream, carrying real data when there is some and a cover record when there is not.
+
+- [ ] Decide the intervals and the fixed record size on offer, and the power and storage cost of each. A small set of choices, so an unusual interval does not identify a device
+- [ ] Decide where it is set: in the sketch, or from the dashboard (which needs Phase 11, and the act of changing it is itself visible)
+- [ ] Define the cover record and the padding, type marker inside the ciphertext only, and publish both in `docs/protocol.md` with vectors
+- [ ] Pad readings and notifications to the same size as cover records
+- [ ] Firmware: send on a timer that data never moves. Real data waits for a slot (alerts included), bursts never raise the rate, retries add no data-dependent traffic, and cover records draw `seq` from the same counter as everything else
+- [ ] Client: leave cover records out of readings, dashboard and notifications without reporting them as gaps or unopenable records; decide how the export treats them
+- [ ] Client: stop assuming the newest page holds recent alerts (10.4 reads 50 records per device, which a fast constant stream fills with cover records)
+- [ ] Test: from the server's side, a run with events and a run without are indistinguishable in size, count and schedule
 
 ### 9.5 Flash encryption documentation
 - [ ] Write hardening guide: enabling ESP32 flash encryption + secure boot fuses
@@ -1291,6 +1301,9 @@ surprise discovered by someone building it.
 > seconds. The version that *is* forbidden, and that will look reasonable to whoever builds
 > this: letting the server push only when a notification arrives, which requires it to be able
 > to tell, which requires 10.0's second decision to be reversed.
+>
+> The planned mobile app (Phase 13) takes a different route and polls the server itself, with
+> no push service in between.
 
 ### 10.5 Sending from the dashboard (not v1)
 
@@ -1583,6 +1596,33 @@ auto-updates it, or a release pipeline shared with the SIoT server, is a bypass 
 - [ ] Threat model: exactly what a malicious server can and cannot do with and without the extension
 - [ ] Measure on real ESP32 hardware: pairing time, update overhead, memory
 - [ ] Usability check of the approval flow: do people actually read the diff, and how often are they asked
+
+---
+
+## Phase 13: Mobile App
+
+> **Deliberately vague, to be revisited.** Design 14.1 states the direction. Nothing here is
+> designed yet, and these items are the questions to answer before there is a task list.
+
+A mobile client that shows devices and readings, raises notifications on the phone, and sends
+instructions to devices. It encrypts and decrypts on the phone, like the web client, and asks
+nothing new of the server's trust.
+
+**Instructions come from either client.** The web dashboard and the phone both send them over
+Phase 11's command path. The web half is 11.5; the phone half is below.
+
+**Notifications come from constantly polling the server.** The app fetches new records,
+decrypts them locally and raises a local notification for alerts. This keeps 10.0 intact (the
+server still cannot tell an alert from a reading) and involves no third-party push service.
+
+- [ ] Choose the platforms and how the app is built, and decide how it reuses `frontend/lib/crypto/`
+- [ ] Check what each OS allows for constant background polling, and its battery cost. Expect Android to need a visible ongoing service and iOS not to allow it; verify both before relying on either
+- [ ] Decide what the phone may store. `kek` is memory-only today, and a background poll needs keys at rest. One candidate: only the `device_notify_key`s, in the platform keystore, so a stolen phone yields alerts and not reading history
+- [ ] Decide how background polling authenticates. Records are fetched with a session that expires after 30 minutes idle and 12 hours at most
+- [ ] Fetch everything since the last record seen, not just the newest page, so an alert cannot scroll out of view between polls (matters more with 9.4)
+- [ ] Never present silence as "no alerts" (the 10.4 rule): a stopped poll, a withholding server and a quiet device look the same
+- [ ] Send instructions to owned devices through Phase 11, limited to the command types the device's schema declares (11.5). Sending needs `device_command_key`, a live session and a vault write for `command_seq`, which is more than receiving alerts needs. Decide whether it requires unlocking the vault each time, so that a phone holding only notify keys cannot actuate anything
+- [ ] Settle 11.3's command freshness decision first: a server can deliver a command late, and a phone user is likely to send one and walk away
 
 ---
 

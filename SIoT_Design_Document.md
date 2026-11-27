@@ -3,7 +3,7 @@
 *"The S in IoT stands for security"*
 
 Status: Architecture phase. A throwaway spike exists (unencrypted HTTP button counter) to validate the ESP32 → server path; none of the design below is implemented yet.
-Last updated: July 31, 2026
+Last updated: November 26, 2026
 
 ---
 
@@ -485,7 +485,19 @@ The server cannot read content but sees the shape of everything: how many device
 
 **For IoT this is not a minor leak.** A motion sensor that uploads only on activity leaks occupancy patterns to a fully passive server without a single byte being decrypted. Upload timing alone can reveal when a house is empty. Encrypting the payload does not hide the fact that a payload existed at 3:47am.
 
-Partial mitigations exist and none are free: fixed-interval uploads with padded dummy records, constant-size payloads, and batching with jitter. All trade power consumption and latency for privacy, and the tradeoff differs per device class. **Not addressed in v1** but it must be an explicit, documented limitation rather than an unnoticed one because users will reasonably assume "zero-knowledge" covers it.
+Partial mitigations exist and none are free. All trade power consumption, storage and latency for privacy, and the tradeoff differs per device class. The planned one is constant-rate uploads (13.2). **Not addressed in v1** but it must be an explicit, documented limitation rather than an unnoticed one because users will reasonably assume "zero-knowledge" covers it.
+
+### 13.2 Constant-rate uploads (planned, optional)
+
+A per-device setting that hides **when something happened** from the server. The device uploads on a fixed schedule whether or not it has anything to say: each slot carries real data if some is waiting, and a cover record if not. The server sees an unchanging stream and cannot tell which slots mattered. Not built yet (roadmap 9.4).
+
+The setting only works if all of these hold:
+
+- **A cover record is an ordinary record.** It is sealed and signed like any other, takes the next `seq` from the same counter (7.1), and is marked as cover only inside the ciphertext, for the same reason a notification's type is. Literal random bytes would pass the server's checks, but a reader could not tell them from a corrupted or tampered record.
+- **Every record is the same size.** Readings, notifications and cover records are padded to one length inside the plaintext. Otherwise size says what timing no longer does.
+- **The schedule never reacts to data.** Real data waits for the next slot, including an alert. A burst is queued, combined or dropped, never sent faster, and retries must not add traffic that depends on what is being sent. The cost is that an alert can be late by up to one interval, or longer behind a queue.
+
+What it does not hide: that the device exists, its interval, when it is offline, and when it reboots (`boot_epoch` is visible in `seq`). It covers only the device's record uploads. The timing of a person's own actions, such as sending a command, writing the vault after reading an alert, or opening a dashboard, is still visible, as are source addresses and the grant graph. A server that cannot tell cover records apart also cannot prune them, so they are stored like everything else.
 
 ---
 
@@ -514,6 +526,14 @@ Every purely software-level trust assumption in the server has been eliminated b
 
 *Fastify was chosen over Express for TypeScript-first design, a structured plugin system, and built-in JSON schema validation.*
 
+### 14.1 Mobile app (planned, not yet designed)
+
+A mobile client is intended, to be designed later (roadmap Phase 13). It is a client in the same sense the web client is: keys and decryption stay on the phone, and the server needs no plaintext and learns no record types.
+
+Its notifications come from **constantly polling the server**: the app fetches new records, decrypts them on the phone, and raises a local notification for any that are alerts. The server never decides what is worth notifying about, and no third-party push service is involved.
+
+**Instructions go the other way from both clients.** The web client and the phone should each be able to send instructions to a device the user owns, over the same command path (roadmap Phase 11): encrypted on the client under `device_command_key`, ordered by the per-device counter in the vault so a replay is refused, queued on the server as ciphertext, and polled by the device. A grant never confers this, since it shares only `device_data_key` (9.1).
+
 ---
 
 ## 15. Open Decisions
@@ -524,12 +544,13 @@ The architecture is settled in shape. These remain genuinely open and should be 
 2. **Extension enforcement under Manifest V3** (Section 10.1) — whether CSP + SRI can carry the guarantee that blocking `webRequest` no longer provides.
 3. **Extension distribution** (Section 10.1) — self-hosted versus Web Store, trading the no-auto-update property against adoption.
 4. **Account recovery** (Section 12) — whether any mechanism can meet the bar of being no weaker than the password.
-5. **Metadata mitigation** (Section 13.1) — whether any device class warrants padded fixed-interval uploads in v1.
+5. **Constant-rate uploads** (Section 13.2): the setting is planned. Open are the intervals and record size offered, whether it is set in the sketch or from the dashboard, and whether any device class has it on by default.
 6. **Vault record granularity** — one blob versus per-record encryption, affecting sync cost and how precisely `vault_version` rollback can be detected.
 7. **Rollback resolution path** (Section 8) — a caught rollback currently has no way past it short of the server serving a newer version again. Whether a deliberate, friction-heavy "accept this older version anyway" control belongs in the client, and if so what it should cost the person choosing it.
 8. **Trusted-core isolation** (Section 10.3): what boundary keeps the UI from touching key material (a separate origin, a sandboxed iframe, a Worker), given that the core must stay small enough to review by hand.
 9. **Transparency log** (Section 10.4): who runs it, how the extension checks inclusion, and whether an off-the-shelf log is good enough.
 10. **Reproducible client build** (Section 10.0): whether Vite's output can be made byte-identical across machines, and what has to be pinned to get there.
+11. **Mobile background access** (Section 14.1): what keys a phone may store, how it authenticates while polling in the background, and which platforms allow constant polling at all.
 
 ---
 
@@ -558,3 +579,5 @@ The architecture is settled in shape. These remain genuinely open and should be 
 | MV3 / Web Store feasibility flagged | 10.1 | Blocking interception and no-auto-update may not both be achievable |
 | Client verification made precise | 10, 10.0, 10.2 to 10.6, 13 | The extension verifies the client code the browser receives, not the server; reproducible builds, the extension's own update channel, review fatigue, targeted attacks and prior work (Code Verify) are now stated. The claim that the zero-knowledge guarantees hold equally without the extension was wrong and is corrected |
 | "No open decisions remaining" replaced | 15 | Six were outstanding |
+| Constant-rate uploads specified as a planned optional setting | 13.2, 15 | Upload timing leaks events to a passive server even though payloads are sealed |
+| Mobile app recorded as planned, notifying by polling; web and phone both send instructions to devices | 14.1, 15 | States the direction before it is designed |

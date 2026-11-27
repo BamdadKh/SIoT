@@ -201,6 +201,7 @@ between devices, secret rotation, and lossless export.
 | 10. Device notifications | 🚧 in progress |
 | 11. Device commands (dashboard to device) | 🚧 in progress |
 | 12. Client verification extension | ⏳ not started |
+| 13. Mobile app | ⏳ not started |
 
 Known gaps, stated plainly: `backend/` has no automated test suite yet (it has been verified by
 hand against a running server), the React screens are not covered by tests, the client
@@ -208,6 +209,22 @@ verification extension does not exist yet (so a malicious server could swap the 
 and there is no
 account recovery in v1. Forgetting the password loses the account, by design, until a recovery
 mechanism exists that is no weaker than the password itself.
+
+## Planned
+
+- **Instructions to devices, from the web or a phone.** An instruction to a device you own is
+  encrypted on your side, the server queues it as ciphertext, and the device picks it up and
+  refuses replays. In the web app a switch on the dashboard sends one, though that has not been
+  run against a server or a board yet ([Phase 11](ROADMAP.md)). Sending from a phone comes with
+  the mobile app.
+- **A mobile app** (still vague, to be designed later). Devices, readings and instructions from a
+  phone, with notifications raised by constantly polling the server and decrypting on the phone,
+  so no push service is involved ([Phase 13](ROADMAP.md)).
+- **Hiding packet timing.** An optional per-device setting that keeps a constant stream going,
+  carrying real data when there is some and an indistinguishable cover record when there is not,
+  so the server cannot tell when something happened. It costs power, storage and latency, and it
+  does not hide your own actions, such as sending an instruction
+  ([Section 13.2](SIoT_Design_Document.md#132-constant-rate-uploads-planned-optional)).
 
 ## Contributing
 
