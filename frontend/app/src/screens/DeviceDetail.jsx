@@ -55,16 +55,20 @@ export function DeviceDetail({ username, deviceId, onSignOut, signingOut }) {
   // performs it, because everything below it is about a device that no longer
   // exists.
   const [deleted, setDeleted] = useState(null);
+  const found = state.status === 'ok' ? locate(state, deviceId) : null;
 
   return (
     <>
       <TopBar username={username} onSignOut={onSignOut} signingOut={signingOut} />
       <main className="page">
-        <div className="page-column">
-          <Link to="/" className="page-back">
-            Devices
-          </Link>
+        <Link to="/" className="page-back">
+          Devices
+        </Link>
 
+        {/* Everything that is not the device itself (a finished delete, a
+            refused vault, a missing device) is a short statement, and is set in
+            a reading measure rather than stretched across both columns. */}
+        <div className="page-column">
           {deleted ? <Deleted deleted={deleted} /> : null}
 
           {!deleted && state.status === 'rollback' ? (
@@ -77,45 +81,52 @@ export function DeviceDetail({ username, deviceId, onSignOut, signingOut }) {
             </p>
           ) : null}
 
-          {!deleted && state.status === 'ok' ? (
-            <Found
-              username={username}
-              deviceId={deviceId}
-              state={state}
-              reload={reload}
-              onDeleted={setDeleted}
-            />
-          ) : null}
+          {!deleted && state.status === 'ok' && !found ? <NoSuchDevice /> : null}
         </div>
+
+        {!deleted && state.status === 'ok' && found ? (
+          <Found
+            username={username}
+            device={found.device}
+            entry={found.entry}
+            state={state}
+            reload={reload}
+            onDeleted={setDeleted}
+          />
+        ) : null}
       </main>
     </>
   );
 }
 
 /** The vault opened and the server answered; now, is this device in either. */
-function Found({ username, deviceId, state, reload, onDeleted }) {
+function locate(state, deviceId) {
   const device = state.devices.find((candidate) => candidate.id === deviceId);
+  if (!device) return null;
   // The vault's half of this device, and the reason an orphan gets neither a
   // rename nor a reveal: there is no entry, so there is no name to change and no
   // `DEVICE_SECRET` left to show.
-  const entry = device ? (findDevice(state.document, device.id) ?? null) : null;
+  const entry = findDevice(state.document, device.id) ?? null;
+  return { device, entry };
+}
 
-  if (!device) {
-    return (
-      <section className="slot">
-        <span className="tick tick-tl" />
-        <span className="tick tick-tr" />
-        <span className="tick tick-bl" />
-        <span className="tick tick-br" />
-        <h2 className="h3">No such device</h2>
-        <p className="prose">
-          Neither your vault nor the server has a device with this identifier. It may have been
-          deleted, or the link may be from another account.
-        </p>
-      </section>
-    );
-  }
+function NoSuchDevice() {
+  return (
+    <section className="slot">
+      <span className="tick tick-tl" />
+      <span className="tick tick-tr" />
+      <span className="tick tick-bl" />
+      <span className="tick tick-br" />
+      <h2 className="h3">No such device</h2>
+      <p className="prose">
+        Neither your vault nor the server has a device with this identifier. It may have been
+        deleted, or the link may be from another account.
+      </p>
+    </section>
+  );
+}
 
+function Found({ username, device, entry, state, reload, onDeleted }) {
   return (
     <>
       {device.name ? (
@@ -137,7 +148,9 @@ function Found({ username, deviceId, state, reload, onDeleted }) {
 
       {device.state === ORPHAN ? <OrphanNote className="unreadable device-section" /> : null}
 
-      {/* Readings come before the management sections because they are what
+      <div className="device-layout">
+        <div className="device-main">
+          {/* Readings come before the management sections because they are what
           someone opened this page to see; rename, reveal and delete are things
           done to a device rather than things it said.
 
@@ -149,42 +162,63 @@ function Found({ username, deviceId, state, reload, onDeleted }) {
           `GET /devices/:id/records` would 404; `UnregisteredNote` says that,
           and an empty readings section beneath it would be a second, vaguer
           way of saying the same thing. */}
-      {device.state === PAIRED && entry ? (
-        <PairedSections username={username} entry={entry} reload={reload} />
-      ) : null}
+          {device.state === PAIRED && entry ? (
+            <PairedSections username={username} entry={entry} reload={reload} />
+          ) : null}
 
-      {/* An unregistered device has sent nothing anyone can see, but its fields
+          {/* An unregistered device has sent nothing anyone can see, but its fields
           can still be declared ahead of the first record, by name. */}
-      {device.state === UNREGISTERED && entry ? (
-        <DeviceFields username={username} entry={entry} observed={NOTHING_OBSERVED} reload={reload} />
-      ) : null}
-
-      {/* An orphan has no vault entry, so there is no name to change, nothing to
-          derive keys from, and no secret to reveal. Roadmap 4.9 is explicit that
-          delete is the only action it gets. */}
-      {entry ? (
-        <>
-          <RenameSection username={username} device={device} reload={reload} />
-          {/* Both halves are needed on both sides: the server checks it owns
-              both rows, and sealing needs both secrets from the vault. */}
-          {device.state === PAIRED ? (
-            <GrantAccess
-              device={device}
+          {device.state === UNREGISTERED && entry ? (
+            <DeviceFields
+              username={username}
               entry={entry}
-              devices={state.devices}
-              findEntry={(id) => findDevice(state.document, id) ?? null}
+              observed={NOTHING_OBSERVED}
+              reload={reload}
             />
           ) : null}
-          <RevealCredentials device={device} entry={entry} />
-        </>
-      ) : null}
 
-      <DeleteSection
-        username={username}
-        device={device}
-        reload={reload}
-        onDeleted={onDeleted}
-      />
+          {/* An orphan has nothing to read and nothing to declare. Its column says
+          so rather than standing empty beside the one action it has. */}
+          {device.state === ORPHAN ? (
+            <section className="device-section">
+              <h2 className="h3">Readings</h2>
+              <p className="prose section-lede">
+                None can be shown. This device&rsquo;s key is not in your vault, so nothing it
+                uploaded can be opened here or anywhere else.
+              </p>
+            </section>
+          ) : null}
+        </div>
+
+        <div className="device-aside">
+          {/* An orphan has no vault entry, so there is no name to change, nothing to
+          derive keys from, and no secret to reveal. Roadmap 4.9 is explicit that
+          delete is the only action it gets. */}
+          {entry ? (
+            <>
+              <RenameSection username={username} device={device} reload={reload} />
+              {/* Both halves are needed on both sides: the server checks it owns
+              both rows, and sealing needs both secrets from the vault. */}
+              {device.state === PAIRED ? (
+                <GrantAccess
+                  device={device}
+                  entry={entry}
+                  devices={state.devices}
+                  findEntry={(id) => findDevice(state.document, id) ?? null}
+                />
+              ) : null}
+              <RevealCredentials device={device} entry={entry} />
+            </>
+          ) : null}
+
+          <DeleteSection
+            username={username}
+            device={device}
+            reload={reload}
+            onDeleted={onDeleted}
+          />
+        </div>
+      </div>
     </>
   );
 }
@@ -234,27 +268,33 @@ function Specification({ device, entry }) {
 
   return (
     <dl className="spec">
-      <dt>Device ID</dt>
-      <dd className="mono spec-id">{device.id}</dd>
+      <div>
+        <dt>Device ID</dt>
+        <dd className="mono spec-id">{device.id}</dd>
+      </div>
 
       {entry ? (
-        <>
+        <div>
           <dt>Added</dt>
           <dd>{formatAdded(entry.added_at)}</dd>
-        </>
+        </div>
       ) : null}
 
-      <dt>Last record</dt>
-      <dd>
-        {device.state === UNREGISTERED ? (
-          <span className="ink-faint">Not registered with the server</span>
-        ) : (
-          <span title={exactLastSeen(device.lastSeenAt)}>{describeLastSeen(device.lastSeenAt)}</span>
-        )}
-      </dd>
+      <div>
+        <dt>Activity</dt>
+        <dd>
+          {device.state === UNREGISTERED ? (
+            <span className="ink-faint">Not registered with the server</span>
+          ) : (
+            <span title={exactLastSeen(device.lastSeenAt)}>
+              {describeLastSeen(device.lastSeenAt)}
+            </span>
+          )}
+        </dd>
+      </div>
 
       {device.state !== UNREGISTERED ? (
-        <>
+        <div>
           <dt>Sequence</dt>
           <dd>
             {sequence ? (
@@ -266,7 +306,7 @@ function Specification({ device, entry }) {
               <span className="ink-faint">Nothing accepted yet</span>
             )}
           </dd>
-        </>
+        </div>
       ) : null}
     </dl>
   );
@@ -499,10 +539,10 @@ function DeleteSection({ username, device, reload, onDeleted }) {
               ) : null}
               {onServer && !inVault ? (
                 <>
-                  The only key that opened them was a{' '}
-                  <span className="mono">DEVICE_SECRET</span> your vault no longer holds, so this
-                  destroys nothing that was still readable. It is permanent all the same: the
-                  records go, and the identifier becomes free for a different device to claim.
+                  The only key that opened them was a <span className="mono">DEVICE_SECRET</span>{' '}
+                  your vault no longer holds, so this destroys nothing that was still readable. It
+                  is permanent all the same: the records go, and the identifier becomes free for a
+                  different device to claim.
                 </>
               ) : null}
               {!onServer && inVault ? (
@@ -590,9 +630,8 @@ function Deleted({ deleted }) {
         <strong>{deleted.name ?? 'The device'}</strong> has been deleted.{' '}
         {deleted.fromServer && deleted.fromVault ? (
           <>
-            Its records are gone from the server and its{' '}
-            <span className="mono">DEVICE_SECRET</span> is gone from your vault. Nothing it uploaded
-            can be recovered, by you or by anyone else.
+            Its records are gone from the server and its <span className="mono">DEVICE_SECRET</span>{' '}
+            is gone from your vault. Nothing it uploaded can be recovered, by you or by anyone else.
           </>
         ) : null}
         {deleted.fromServer && !deleted.fromVault ? (
@@ -669,7 +708,8 @@ function describe(failure) {
     );
   }
   if (failure instanceof ApiError) {
-    if (failure.status === 401) return 'Your session ended. Sign in again; the name was not changed.';
+    if (failure.status === 401)
+      return 'Your session ended. Sign in again; the name was not changed.';
     if (failure.status === 409) {
       return 'Your vault changed in another tab, so this write was refused. Reload and try again.';
     }

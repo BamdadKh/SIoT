@@ -18,12 +18,12 @@
 
   /* --- ground ------------------------------------------------------------ */
   --paper: #efede7;
-  --grid-ink: rgba(88, 78, 58, 0.07);
+  --grid-ink: rgba(88, 78, 58, 0.045);
   --surface: #faf9f5;
   --surface-input: #ffffff;
 
   /* --- rules -------------------------------------------------------------- */
-  --line: #e0dbcf;
+  --line: #e3dfd4;
   --line-strong: #a89f8b;
   --line-control: #bdb5a2;
 
@@ -35,7 +35,12 @@
   /* --- olive: actions ----------------------------------------------------- */
   --olive: #57712a;
   --olive-strong: #445920;
-  --olive-mute: #8b9470;
+  /* A control that cannot be pressed yet. Neutral rather than a paler olive:
+     a faded olive block still reads as the thing to press, and on a form that
+     starts disabled (Save name, Save fields) that was the loudest thing on the
+     screen while meaning nothing. */
+  --control-off: #e4e0d5;
+  --on-control-off: #8a8474;
   --olive-halo: rgba(87, 113, 42, 0.14);
   --on-olive: #f8f9f3;
 
@@ -66,14 +71,18 @@
   --wdth-head: 110%;
   --wdth-control: 108%;
 
-  --size-h1: 32px;
-  --size-h2: 30px;
-  --size-h3: 20px;
+  /* The floor is 12px. Labels were 9px mono capitals and identifiers 10px mono,
+     which made the one value on a device page someone might need to read back
+     (its DEVICE_ID) the hardest thing on it to read. */
+  --size-h1: 30px;
+  --size-h2: 28px;
+  --size-h3: 17px;
+  --size-value: 24px;
   --size-control: 15px;
-  --size-body: 14px;
-  --size-small: 13.5px;
-  --size-mono: 10px;
-  --size-label: 9px;
+  --size-body: 15px;
+  --size-small: 14px;
+  --size-mono: 12.5px;
+  --size-label: 12.5px;
 
   /* --- space -------------------------------------------------------------- */
   --sp-1: 4px;
@@ -101,5 +110,11 @@
   --tick: 13px;
 
   --control-height: 42px;
-  --plate-width: 424px;
+  --plate-width: 420px;
+
+  /* The signed-in screens share one content width, and the top bar lines its
+     two ends up with it, so the wordmark sits over the left edge of the page
+     rather than in the window's corner. */
+  --page-width: 1040px;
+  --gutter: 28px;
 }

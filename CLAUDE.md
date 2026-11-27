@@ -152,10 +152,22 @@ also prints the SPKI pin, which is what Phase 5.6 firmware will pin.
   away. If a link under a button ever competes with it again, the answer is fewer controls
   on that screen, not a second link style.
 - **A disabled link-control is faint ink, never a filled shape.** `.button:disabled` paints
-  `--olive-mute` at specificity 0,2,0 and beats `.button`'s own `background` declaration, so
-  a `.button-link` that is merely `display: inline` inherits an olive block the moment it is
-  disabled. `.button-link:disabled` exists to undo that and has to keep winning on source
+  `--control-off` at specificity 0,2,0 and beats `.button`'s own `background` declaration, so
+  a `.button-link` that is merely `display: inline` inherits a filled block the moment it is
+  disabled. A disabled `.button` is neutral, not a paler olive: a faded olive block still
+  reads as the thing to press, and forms that start disabled made it the loudest thing on
+  screen. `.button-link:disabled` exists to undo that and has to keep winning on source
   order; it is not decoration.
+- **The device page is two columns, data left and actions right.** `DeviceDetail` puts
+  Dashboard, Readings, Fields and Download in `.device-main` and Name, Grants, Credentials
+  and Delete in `.device-aside`, under a ruled `.spec` strip. Each `section.device-section`
+  is a ruled panel (the plate's surface, never its ticks). It was one 560px column of nine
+  equal sections pinned left in a page twice that wide, and the readings scrolled away
+  under the forms. The columns fold to one below 860px.
+- **Labels are sentence-case sans, and nothing is set below 12px.** Field labels and spec
+  keys were 9px mono capitals and identifiers 10px mono; the one value a device page exists
+  to let someone copy was the hardest thing on it to read. Mono stays for values the
+  machine owns, at `--size-mono`, and shrinks to the surrounding size inside a sentence.
 - **Status panels are one family: `.alarm`, `.success`, `.board-note`.** Same box metrics,
   differing only in token. `.board-note` is the neutral member, for things that are neither
   failures nor completions ("this board is blank", "added but not written to hardware"). It
