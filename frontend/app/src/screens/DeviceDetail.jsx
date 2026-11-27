@@ -247,7 +247,12 @@ function PairedSections({ username, entry, reload }) {
 
   return (
     <>
-      <DeviceDashboard state={records} schema={entry.schema ?? null} />
+      <DeviceDashboard
+        state={records}
+        schema={entry.schema ?? null}
+        username={username}
+        deviceId={entry.id}
+      />
       <DeviceReadings state={records} onLoadOlder={loadOlder} schema={entry.schema ?? null} />
       <DeviceFields username={username} entry={entry} observed={observed} reload={reload} />
       <ExportRecords entry={entry} />

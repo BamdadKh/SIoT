@@ -2,6 +2,8 @@ import { useRef, useState } from 'react';
 import {
   buildSchema,
   setDeviceSchema,
+  withSetStateCommands,
+  COMMAND_TYPE_MAX_LENGTH,
   SCHEMA_KEY_MAX_LENGTH,
   SCHEMA_LABEL_MAX_LENGTH,
   SCHEMA_MAX_FIELDS,
@@ -116,11 +118,14 @@ export function DeviceFields({ username, entry, observed, reload }) {
     if (busy || !changed) return;
 
     let fields;
+    let commands;
     try {
       // Checked before the network, so a field the allowlist refuses names
-      // itself without a vault read in between.
+      // itself without a vault read in between. A switch that names a command
+      // declares it here too (roadmap 11.5), in the one shape a switch can send.
       fields = rows.map(toField);
-      buildSchema(fields);
+      commands = withSetStateCommands(fields, entry.schema?.commands ?? []);
+      buildSchema(fields, commands);
     } catch (failure) {
       setError(failure.message);
       return;
@@ -130,7 +135,11 @@ export function DeviceFields({ username, entry, observed, reload }) {
     setError(null);
     try {
       const { version, document } = await loadVault(username);
-      await storeVault(username, version, setDeviceSchema(document, entry.id, fields));
+      // Re-derived from the freshly read entry, so a command another tab
+      // declared since this page loaded is kept rather than overwritten.
+      const current = document.devices.find((device) => device.id === entry.id);
+      const fresh = withSetStateCommands(fields, current?.schema?.commands ?? commands);
+      await storeVault(username, version, setDeviceSchema(document, entry.id, fields, fresh));
       setDraft(null);
       setSaved(true);
       await reload();
@@ -148,6 +157,7 @@ export function DeviceFields({ username, entry, observed, reload }) {
         What each reading is: what to call it, its unit, and how to show it. Stored in your vault
         beside this device&rsquo;s secret, so the server cannot tell a thermometer from a door
         sensor. Once the device sends a declared field, the dashboard above draws it, in the order listed here.
+        A switch that names a command its sketch accepts can be pressed there, too.
       </p>
 
       <form className="stack stack-4" onSubmit={handleSubmit}>
@@ -301,6 +311,22 @@ function FieldRow({ row, disabled, onMoveUp, onMoveDown, onChange, onRemove }) {
           />
         ) : null}
 
+        {/* Roadmap 11.5: what the switch on the dashboard sends. Empty leaves it
+            showing state only. The name is matched exactly by the sketch, so it
+            is an identifier, not a label. */}
+        {row.widget === 'toggle' ? (
+          <Field
+            label="Command it accepts"
+            value={row.command}
+            onChange={(command) => onChange({ command })}
+            disabled={disabled}
+            maxLength={COMMAND_TYPE_MAX_LENGTH}
+            placeholder="set_state"
+            spellCheck={false}
+            autoComplete="off"
+          />
+        ) : null}
+
         {row.widget === 'gauge' ? (
           <>
             <Field
@@ -337,6 +363,7 @@ function toRow(field, typedKey) {
     unit: field.unit ?? '',
     min: field.min === undefined ? '' : String(field.min),
     max: field.max === undefined ? '' : String(field.max),
+    command: field.command ?? '',
   };
 }
 
@@ -349,6 +376,7 @@ function toField(row) {
   const field = { key: row.key, type: row.type, widget: row.widget };
   if (row.label.trim()) field.label = row.label;
   if (row.type === 'number' && row.unit.trim()) field.unit = row.unit;
+  if (row.widget === 'toggle' && row.command.trim()) field.command = row.command.trim();
   if (row.widget === 'gauge') {
     field.min = row.min.trim() === '' ? NaN : Number(row.min);
     field.max = row.max.trim() === '' ? NaN : Number(row.max);

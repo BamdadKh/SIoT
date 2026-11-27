@@ -103,6 +103,16 @@ export {
   SCHEMA_KEY_MAX_LENGTH,
   SCHEMA_LABEL_MAX_LENGTH,
   SCHEMA_UNIT_MAX_LENGTH,
+  parseSchemaCommand,
+  findSchemaCommand,
+  buildCommandArgs,
+  isSetStateCommand,
+  withSetStateCommands,
+  COMMAND_TYPE_MAX_LENGTH,
+  COMMAND_ARG_NAME_MAX_LENGTH,
+  COMMAND_MAX_ARGS,
+  COMMAND_TEXT_MAX_BYTES,
+  SCHEMA_MAX_COMMANDS,
 } from './device-schema.js';
 
 import { deriveMasterKey } from './argon2.js';

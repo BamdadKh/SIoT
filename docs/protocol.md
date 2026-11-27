@@ -336,6 +336,28 @@ When B's `DEVICE_SECRET` rotates there is a new grant; keep the old ones, each o
 different slice of B's history. No published vector yet: the unit tests in
 `frontend/test/grant.test.js` are the reference.
 
+### Commands
+
+A device that accepts commands polls `GET /siot/devices/<DEVICE_ID>/commands` and opens each
+one under `device_command_key`:
+
+```
+nonce     = 12 random bytes (the browser encrypts, so a counter is not needed)
+AAD       = 0x01 (version) || DEVICE_ID (16B) || 0x01 (command class)
+plaintext = CBOR { "command_seq": uint, "type": text, "args": map }
+```
+
+A device MUST persist the highest `command_seq` it has acted on, MUST skip anything at or
+below it, and SHOULD advance the mark before the side effect fires, because delivery is at
+least once. The types and arguments a dashboard will send are exactly the ones the device's
+schema declares, which lives in the owner's vault: `type` is `[a-z0-9_]`, at most 32 bytes;
+argument names are `[a-z0-9_]`, at most 24 bytes; a number argument carries declared bounds,
+a text argument at most 120 UTF-8 bytes. A dashboard switch sends one shape only: a command
+whose single argument is a boolean named `value`, meaning "set the state to this". Write the
+handler so a duplicate is harmless: "set to off" twice is off, "toggle" twice is not. The
+unit tests in `frontend/test/command.test.js` and `frontend/test/command-schema.test.js` are
+the reference; there is no published vector yet.
+
 ---
 
 ## 9. What a port must supply for itself

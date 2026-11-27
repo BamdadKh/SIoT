@@ -1,5 +1,8 @@
-import { useMemo } from 'react';
-import { valueMatchesField } from '@siot/crypto';
+import { useEffect, useMemo, useState } from 'react';
+import { findSchemaCommand, isSetStateCommand, valueMatchesField } from '@siot/crypto';
+import { ApiError } from '../lib/api.js';
+import { sendCommand } from '../lib/send-command.js';
+import { VaultRollbackError } from '../lib/vault-store.js';
 import { buildDashboard, gaugePosition } from '../lib/dashboard.js';
 import { formatReading } from '../lib/records.js';
 import { describeSequence } from '../lib/sequence.js';
@@ -22,10 +25,11 @@ import { describeSequence } from '../lib/sequence.js';
  * is as much as the client knows. What `dashboard.js` decides about gaps,
  * restarts and mismatched values is stated on the panel rather than drawn over.
  *
- * @param {{ state: object, schema: object|null }} props `state` is the
- *        `useDeviceRecords` state Readings is drawn from.
+ * @param {{ state: object, schema: object|null, username: string, deviceId: string }} props
+ *        `state` is the `useDeviceRecords` state Readings is drawn from; the other
+ *        two are what a switch needs to send (roadmap 11.5).
  */
-export function DeviceDashboard({ state, schema }) {
+export function DeviceDashboard({ state, schema, username, deviceId }) {
   const panels = useMemo(
     () => (state.status === 'ok' ? buildDashboard(schema, state.records, valueMatchesField) : []),
     [state, schema],
@@ -49,7 +53,13 @@ export function DeviceDashboard({ state, schema }) {
 
       <ol className="record-list">
         {panels.map((panel) => (
-          <Panel key={panel.field.key} panel={panel} />
+          <Panel
+            key={panel.field.key}
+            panel={panel}
+            schema={schema}
+            username={username}
+            deviceId={deviceId}
+          />
         ))}
       </ol>
     </section>
@@ -67,7 +77,7 @@ const WIDGETS = {
 /** How a declared type reads in a sentence, matching Readings. */
 const TYPE_NAMES = { number: 'a number', boolean: 'on or off', text: 'text' };
 
-function Panel({ panel }) {
+function Panel({ panel, schema, username, deviceId }) {
   const { field, latest } = panel;
   const Widget = Object.hasOwn(WIDGETS, field.widget) ? WIDGETS[field.widget] : ValueWidget;
 
@@ -80,7 +90,7 @@ function Panel({ panel }) {
     // still draws, since its history is more than the newest value.
     body = <Mismatch field={field} value={latest.value} />;
   } else {
-    body = <Widget panel={panel} />;
+    body = <Widget panel={panel} schema={schema} username={username} deviceId={deviceId} />;
   }
 
   return (
@@ -303,14 +313,27 @@ function GaugeWidget({ panel }) {
 /* --- toggle --------------------------------------------------------------- */
 
 /**
- * State as the device last reported it, and only that. Drawn as a switch
- * because that is what the field declared, in ink rather than olive and with no
- * pointer, since it cannot be pressed: sending to a device is Phase 11's command
- * channel (roadmap 11.5), and a control that looked live and did nothing would
- * be worse than one that says it is not built.
+ * State as the device last reported it, and, when the field names a declared
+ * set-state command, a way to ask for the other one (roadmap 11.5).
+ *
+ * **The switch draws what the device said, never what was asked for.** Pressing
+ * sends a command; it does not flip the drawing. The device runs the command
+ * when it next polls, and the switch changes when a record reporting the new
+ * state arrives. Drawing the request as the state would be the dashboard
+ * asserting something about the physical world it has no evidence for.
+ *
+ * The command is "set the state to X", never "toggle": delivery is at least once
+ * (ROADMAP 11.0), and a duplicate of "set to off" is harmless where a duplicate
+ * "toggle" undoes itself. The control sits at the end of its line, like every
+ * other control in the app's text flow.
+ *
+ * A switch with no command is read-only and says so, as before.
  */
-function ToggleWidget({ panel }) {
+function ToggleWidget({ panel, schema, username, deviceId }) {
   const on = panel.latest.value === true;
+  const command = panel.field.command ? findSchemaCommand(schema, panel.field.command) : null;
+  const sendable = isSetStateCommand(command);
+
   return (
     <div className="stack stack-3">
       <p className="dash-switch-row">
@@ -319,9 +342,95 @@ function ToggleWidget({ panel }) {
         </span>
         <span className="dash-value">{on ? 'On' : 'Off'}</span>
       </p>
-      <p className="small ink-faint">As reported. Switching it from here is not built yet.</p>
+      {sendable ? (
+        <SwitchCommand
+          on={on}
+          type={command.type}
+          username={username}
+          deviceId={deviceId}
+          reportedSeq={panel.latest.seq}
+        />
+      ) : (
+        <p className="small ink-faint">
+          As reported. Name the command its sketch accepts under Fields to switch it from here.
+        </p>
+      )}
     </div>
   );
+}
+
+function SwitchCommand({ on, type, username, deviceId, reportedSeq }) {
+  // null | 'sending' | { sent: number, wanted: boolean } | { error: string }
+  const [status, setStatus] = useState(null);
+
+  // A newer report supersedes whatever this line was saying about the last
+  // request: either the device did it, or the state moved for another reason,
+  // and in both cases the drawn switch above is now the truth to read.
+  useEffect(() => {
+    setStatus(null);
+  }, [reportedSeq]);
+
+  const wanted = !on;
+  const busy = status === 'sending';
+
+  async function handleSend() {
+    if (busy) return;
+    setStatus('sending');
+    try {
+      const { commandSeq } = await sendCommand(username, deviceId, type, { value: wanted });
+      setStatus({ sent: commandSeq, wanted });
+    } catch (failure) {
+      setStatus({ error: describeSend(failure) });
+    }
+  }
+
+  const control = (
+    <button className="button button-link" type="button" onClick={handleSend} disabled={busy}>
+      {busy ? 'Sending' : wanted ? 'Turn it on' : 'Turn it off'}
+    </button>
+  );
+
+  if (status && typeof status === 'object' && 'sent' in status) {
+    return (
+      <p className="small">
+        Asked for {status.wanted ? 'on' : 'off'} (command {status.sent}). The device acts on it the
+        next time it checks, and the switch above changes when it reports back. The server can
+        hold a command back, so it may run later than it was sent. Ask again?{' '}
+        {control}
+      </p>
+    );
+  }
+
+  return (
+    <>
+      {status && typeof status === 'object' && 'error' in status ? (
+        <p className="alarm" role="alert">
+          {status.error}
+        </p>
+      ) : null}
+      <p className="small">
+        {on ? 'On' : 'Off'}, as reported. {control}
+      </p>
+    </>
+  );
+}
+
+function describeSend(failure) {
+  if (failure instanceof VaultRollbackError) {
+    return (
+      `The server returned vault version ${failure.serverVersion} when this browser has already ` +
+      `seen ${failure.cachedVersion}, so nothing was sent.`
+    );
+  }
+  if (failure instanceof ApiError) {
+    if (failure.status === 401) return 'Your session ended. Sign in again; nothing was sent.';
+    if (failure.status === 409) {
+      return 'Your vault changed in another tab, so nothing was sent. Try again.';
+    }
+    if (failure.status === 0) return 'Could not reach the server. Nothing was sent.';
+    return `${failure.message}. The command may not have been queued.`;
+  }
+  return failure?.message ?? 'Could not send the command.';
 }
 
 /** Exact rather than relative, for the reason `DeviceReadings` gives. */

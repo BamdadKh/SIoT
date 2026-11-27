@@ -54,8 +54,11 @@ export const SCHEMA_MAX_FIELDS = 32;
  * owns the mapping from these names to components, and a name not in this table
  * never reaches it.
  *
- * `toggle` renders state only. Writing back to a device is Phase 11's command
- * channel, and a schema declaring a toggle grants nothing by itself.
+ * `toggle` renders state, and sends only if the field names a declared command
+ * (`command`) whose one argument is a boolean called `value`: "set the state to
+ * X". That shape is idempotent by construction, which ROADMAP 11.0 asks the
+ * schema to steer towards, since delivery is at-least-once. A toggle with no
+ * command is a read-only switch, as before.
  */
 export const SCHEMA_WIDGETS = Object.freeze({
   number: Object.freeze(['value', 'graph', 'gauge']),
@@ -64,6 +67,38 @@ export const SCHEMA_WIDGETS = Object.freeze({
 });
 
 export const SCHEMA_TYPES = Object.freeze(Object.keys(SCHEMA_WIDGETS));
+
+/*
+ * --- commands (roadmap 11.5) ----------------------------------------------
+ *
+ * A schema also says what a dashboard is allowed to *send*: the command types
+ * the device accepts and the exact shape of each one's arguments. Same allowlist
+ * discipline as rendering, pointed the other way. A dashboard can only send a
+ * command the schema declares, with exactly the arguments it declares, each of
+ * the declared type and inside the declared bounds. There is no free-form
+ * channel to a device, because a device that used to be only a writer gains a
+ * new resource-exhaustion surface the moment it can be sent anything at all.
+ *
+ * The names are matched byte for byte by firmware (`command.type()`,
+ * `getBool("value", ...)`), so they are refused rather than cleaned, like a
+ * reading key, and restricted to `[a-z0-9_]`: a command type is an identifier in
+ * someone's sketch, not prose.
+ */
+
+/** Matches the firmware's `type_[33]`: 32 bytes and a terminator. */
+export const COMMAND_TYPE_MAX_LENGTH = 32;
+export const COMMAND_ARG_NAME_MAX_LENGTH = 24;
+export const SCHEMA_MAX_COMMANDS = 16;
+export const COMMAND_MAX_ARGS = 8;
+/**
+ * The default and the ceiling for a text argument, in UTF-8 bytes. 120 is the
+ * notification message bound (10.2), for the same reason in the other direction.
+ */
+export const COMMAND_TEXT_DEFAULT_BYTES = 64;
+export const COMMAND_TEXT_MAX_BYTES = 120;
+export const COMMAND_ARG_TYPES = Object.freeze(['boolean', 'number', 'text']);
+
+const IDENTIFIER = /^[a-z0-9_]+$/;
 
 /**
  * One field, validated, as a new object holding only what this file names.
@@ -108,6 +143,12 @@ export function parseSchemaField(raw) {
     if (unit) field.unit = unit;
   }
 
+  // A link to a declared command, checked against the command list by the
+  // caller, since a field on its own cannot know what else the schema declares.
+  if (widget === 'toggle' && raw.command !== undefined && raw.command !== null && raw.command !== '') {
+    field.command = parseIdentifier(raw.command, COMMAND_TYPE_MAX_LENGTH, `${key}: the command`);
+  }
+
   // A gauge without a range is a needle with no dial. Required for a gauge and
   // dropped for everything else, for the same reason as the unit.
   if (widget === 'gauge') {
@@ -124,17 +165,131 @@ export function parseSchemaField(raw) {
 }
 
 /**
- * Validates a complete field list for saving. Refuses rather than repairs.
+ * One declared command, validated, as a new object holding only what this file
+ * names. Throws `TypeError` with a message fit to show the person who typed it.
+ *
+ * @param {unknown} raw
+ * @returns {{ type: string, label?: string, args: Array<{ name: string,
+ *             type: 'boolean'|'number'|'text', min?: number, max?: number,
+ *             max_bytes?: number }> }}
+ */
+export function parseSchemaCommand(raw) {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new TypeError('A command must be an object.');
+  }
+  const type = parseIdentifier(raw.type, COMMAND_TYPE_MAX_LENGTH, 'A command type');
+  const command = { type, args: [] };
+
+  const label = optionalText(raw.label, SCHEMA_LABEL_MAX_LENGTH, `${type}: the label`);
+  if (label) command.label = label;
+
+  const args = raw.args ?? [];
+  if (!Array.isArray(args)) throw new TypeError(`${type}: the arguments must be a list.`);
+  if (args.length > COMMAND_MAX_ARGS) {
+    throw new TypeError(`${type}: a command takes at most ${COMMAND_MAX_ARGS} arguments.`);
+  }
+  const seen = new Set();
+  for (const rawArg of args) {
+    if (typeof rawArg !== 'object' || rawArg === null || Array.isArray(rawArg)) {
+      throw new TypeError(`${type}: an argument must be an object.`);
+    }
+    const name = parseIdentifier(
+      rawArg.name,
+      COMMAND_ARG_NAME_MAX_LENGTH,
+      `${type}: an argument name`,
+    );
+    if (seen.has(name)) throw new TypeError(`${type}: ${name} is declared twice.`);
+    seen.add(name);
+    if (typeof rawArg.type !== 'string' || !COMMAND_ARG_TYPES.includes(rawArg.type)) {
+      throw new TypeError(`${type}: ${name} must be one of ${COMMAND_ARG_TYPES.join(', ')}.`);
+    }
+    const arg = { name, type: rawArg.type };
+    if (arg.type === 'number') {
+      // Both bounds are required: an unbounded number is a device being asked to
+      // cope with any value at all, which is the surface this exists to close.
+      arg.min = finite(rawArg.min, `${type}: the minimum of ${name}`);
+      arg.max = finite(rawArg.max, `${type}: the maximum of ${name}`);
+      if (!(arg.min <= arg.max)) {
+        throw new TypeError(`${type}: the minimum of ${name} must not be above its maximum.`);
+      }
+    }
+    if (arg.type === 'text') {
+      const bytes = rawArg.max_bytes ?? COMMAND_TEXT_DEFAULT_BYTES;
+      if (!Number.isInteger(bytes) || bytes < 1 || bytes > COMMAND_TEXT_MAX_BYTES) {
+        throw new TypeError(`${type}: ${name} can be at most ${COMMAND_TEXT_MAX_BYTES} bytes long.`);
+      }
+      arg.max_bytes = bytes;
+    }
+    command.args.push(arg);
+  }
+  return command;
+}
+
+/**
+ * Whether a command is the shape a switch can send: one boolean called `value`.
+ *
+ * @param {{ args: Array<{ name: string, type: string }> } | null} command
+ */
+export function isSetStateCommand(command) {
+  return (
+    command !== null &&
+    command.args.length === 1 &&
+    command.args[0].name === 'value' &&
+    command.args[0].type === 'boolean'
+  );
+}
+
+/**
+ * The command list a set of fields needs: what is already declared, plus a
+ * set-state command (one boolean named `value`) for every switch that names a
+ * command nobody has declared yet. This is how the Fields form declares a
+ * switch's command without a second form for commands, and it only ever adds
+ * the one shape a switch can send. A switch naming a command that exists in some
+ * other shape is left for `buildSchema` to refuse by name.
+ *
+ * @param {Array<{ widget: string, command?: string }>} fields
+ * @param {unknown[]} commands already declared.
+ * @returns {unknown[]}
+ */
+export function withSetStateCommands(fields, commands) {
+  const next = [...commands];
+  const types = new Set(next.map((command) => command?.type));
+  for (const field of fields) {
+    if (field.widget !== 'toggle' || !field.command || types.has(field.command)) continue;
+    types.add(field.command);
+    next.push({ type: field.command, args: [{ name: 'value', type: 'boolean' }] });
+  }
+  return next;
+}
+
+/**
+ * Validates a complete field list, and optionally a command list, for saving.
+ * Refuses rather than repairs.
  *
  * @param {unknown[]} fields
- * @returns {{ v: number, fields: ReturnType<typeof parseSchemaField>[] } | null}
- *          null for an empty list: a device with no fields declared has no
- *          schema, and storing an empty one would be a second way to say that.
+ * @param {unknown[]} [commands]
+ * @returns {{ v: number, fields: ReturnType<typeof parseSchemaField>[],
+ *             commands?: ReturnType<typeof parseSchemaCommand>[] } | null}
+ *          null when nothing is declared: a device with no fields and no commands
+ *          has no schema, and storing an empty one would be a second way to say that.
  */
-export function buildSchema(fields) {
+export function buildSchema(fields, commands = []) {
   if (!Array.isArray(fields)) throw new TypeError('Fields must be a list.');
   if (fields.length > SCHEMA_MAX_FIELDS) {
     throw new TypeError(`A device can declare at most ${SCHEMA_MAX_FIELDS} fields.`);
+  }
+  if (!Array.isArray(commands)) throw new TypeError('Commands must be a list.');
+  if (commands.length > SCHEMA_MAX_COMMANDS) {
+    throw new TypeError(`A device can declare at most ${SCHEMA_MAX_COMMANDS} commands.`);
+  }
+
+  const parsedCommands = [];
+  const types = new Set();
+  for (const raw of commands) {
+    const command = parseSchemaCommand(raw);
+    if (types.has(command.type)) throw new TypeError(`${command.type} is declared twice.`);
+    types.add(command.type);
+    parsedCommands.push(command);
   }
 
   const parsed = [];
@@ -144,10 +299,24 @@ export function buildSchema(fields) {
     // Two fields for one key would leave the renderer choosing between them.
     if (seen.has(field.key)) throw new TypeError(`${field.key} is declared twice.`);
     seen.add(field.key);
+    if (field.command !== undefined) {
+      const target = parsedCommands.find((command) => command.type === field.command) ?? null;
+      if (!target) {
+        throw new TypeError(`${field.key}: the command ${field.command} is not declared.`);
+      }
+      if (!isSetStateCommand(target)) {
+        throw new TypeError(
+          `${field.key}: a switch can only send a command whose one argument is a boolean named value.`,
+        );
+      }
+    }
     parsed.push(field);
   }
 
-  return parsed.length === 0 ? null : { v: SCHEMA_VERSION, fields: parsed };
+  if (parsed.length === 0 && parsedCommands.length === 0) return null;
+  const schema = { v: SCHEMA_VERSION, fields: parsed };
+  if (parsedCommands.length > 0) schema.commands = parsedCommands;
+  return schema;
 }
 
 /**
@@ -167,15 +336,40 @@ export function normaliseSchema(raw) {
   // v1 would be guessing, and guessing is what the allowlist exists to prevent.
   if (raw.v !== SCHEMA_VERSION) return { schema: null, dropped: raw.fields.length || 1 };
 
+  let dropped = 0;
+
+  // Commands first, so a field's link can be checked against what survived. A
+  // command that will not parse is dropped and counted like a field; a switch
+  // pointing at it then loses the link and stays a read-only switch, rather than
+  // the field going too.
+  const commands = [];
+  const types = new Set();
+  const rawCommands = Array.isArray(raw.commands) ? raw.commands : [];
+  if (raw.commands !== undefined && !Array.isArray(raw.commands)) dropped += 1;
+  for (const entry of rawCommands.slice(0, SCHEMA_MAX_COMMANDS)) {
+    try {
+      const command = parseSchemaCommand(entry);
+      if (types.has(command.type)) throw new TypeError('duplicate type');
+      types.add(command.type);
+      commands.push(command);
+    } catch {
+      dropped += 1;
+    }
+  }
+  dropped += Math.max(0, rawCommands.length - SCHEMA_MAX_COMMANDS);
+
   const fields = [];
   const seen = new Set();
-  let dropped = 0;
 
   for (const entry of raw.fields.slice(0, SCHEMA_MAX_FIELDS)) {
     try {
       const field = parseSchemaField(entry);
       if (seen.has(field.key)) throw new TypeError('duplicate key');
       seen.add(field.key);
+      if (field.command !== undefined) {
+        const target = commands.find((command) => command.type === field.command) ?? null;
+        if (!isSetStateCommand(target)) delete field.command;
+      }
       fields.push(field);
     } catch {
       dropped += 1;
@@ -183,10 +377,68 @@ export function normaliseSchema(raw) {
   }
   dropped += Math.max(0, raw.fields.length - SCHEMA_MAX_FIELDS);
 
-  return {
-    schema: fields.length === 0 ? null : { v: SCHEMA_VERSION, fields },
-    dropped,
-  };
+  if (fields.length === 0 && commands.length === 0) return { schema: null, dropped };
+  const schema = { v: SCHEMA_VERSION, fields };
+  if (commands.length > 0) schema.commands = commands;
+  return { schema, dropped };
+}
+
+/**
+ * The declared command of a type, or null.
+ *
+ * @param {ReturnType<typeof buildSchema>} schema
+ * @param {string} type
+ */
+export function findSchemaCommand(schema, type) {
+  return schema?.commands?.find((command) => command.type === type) ?? null;
+}
+
+/**
+ * Builds the `args` for one command from values a screen collected, refusing
+ * anything the declaration does not allow (roadmap 11.5). This is the last check
+ * before `encryptCommand`, and it is the one that matters: a screen can only
+ * ever hand it values, never shape.
+ *
+ * @param {ReturnType<typeof parseSchemaCommand>} command declared, normalised.
+ * @param {Record<string, unknown>} values
+ * @returns {Record<string, boolean|number|string>} a null-prototype object (what
+ *          `encodeCbor` accepts besides a plain one), so an argument named
+ *          `__proto__`, which the identifier rule allows, is an entry and not a
+ *          prototype write.
+ */
+export function buildCommandArgs(command, values) {
+  if (typeof values !== 'object' || values === null) {
+    throw new TypeError('Command arguments must be an object.');
+  }
+  const declared = new Set(command.args.map((arg) => arg.name));
+  for (const name of Object.keys(values)) {
+    if (!declared.has(name)) throw new TypeError(`${command.type} takes no argument ${name}.`);
+  }
+
+  const args = Object.create(null);
+  for (const arg of command.args) {
+    if (!Object.hasOwn(values, arg.name)) {
+      throw new TypeError(`${command.type} needs ${arg.name}.`);
+    }
+    const value = values[arg.name];
+    if (arg.type === 'boolean') {
+      if (typeof value !== 'boolean') throw new TypeError(`${arg.name} must be on or off.`);
+    } else if (arg.type === 'number') {
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new TypeError(`${arg.name} must be a number.`);
+      }
+      if (value < arg.min || value > arg.max) {
+        throw new RangeError(`${arg.name} must be between ${arg.min} and ${arg.max}.`);
+      }
+    } else {
+      if (typeof value !== 'string') throw new TypeError(`${arg.name} must be text.`);
+      if (new TextEncoder().encode(value).length > arg.max_bytes) {
+        throw new RangeError(`${arg.name} can be at most ${arg.max_bytes} bytes.`);
+      }
+    }
+    args[arg.name] = value;
+  }
+  return args;
 }
 
 /**
@@ -292,6 +544,15 @@ function parseKey(raw) {
     throw new TypeError(
       'A reading name cannot hold invisible characters or start or end with a space.',
     );
+  }
+  return raw;
+}
+
+function parseIdentifier(raw, max, what) {
+  if (typeof raw !== 'string' || raw.length === 0) throw new TypeError(`${what} is required.`);
+  if (raw.length > max) throw new TypeError(`${what} is at most ${max} characters.`);
+  if (!IDENTIFIER.test(raw)) {
+    throw new TypeError(`${what} can only use lowercase letters, digits and underscores.`);
   }
   return raw;
 }

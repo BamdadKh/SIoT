@@ -407,15 +407,21 @@ export function renameDevice(doc, deviceId, name) {
  * Validated strictly here, at the last point before sealing, so a caller that
  * skipped `buildSchema` still cannot write a schema a reader would discard.
  *
+ * Commands (roadmap 11.5) ride on the same schema. Omitting them keeps what the
+ * entry already declares, so a caller that edits only fields cannot erase what
+ * a device is allowed to be sent by not knowing about it.
+ *
  * @param {{ devices: Array }} doc
  * @param {string} deviceId base64url
  * @param {unknown[]} fields
+ * @param {unknown[]} [commands] defaults to the commands already stored.
  */
-export function setDeviceSchema(doc, deviceId, fields) {
-  if (!findDevice(doc, deviceId)) {
+export function setDeviceSchema(doc, deviceId, fields, commands) {
+  const entry = findDevice(doc, deviceId);
+  if (!entry) {
     throw new Error('no such device in the vault');
   }
-  const schema = buildSchema(fields);
+  const schema = buildSchema(fields, commands ?? entry.schema?.commands ?? []);
 
   return {
     ...doc,

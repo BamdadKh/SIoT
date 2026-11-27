@@ -1482,14 +1482,41 @@ its own phase, not an item folded in here.
 
 ### 11.5 Command types come from the schema, not a free-form channel
 
-- [ ] A device's schema (7.1) declares which command types it accepts and their argument shape
+- [x] A device's schema (7.1) declares which command types it accepts and their argument shape
       — the same allowlist discipline 7.2 applies to rendering, now applied to what a dashboard
       is even allowed to *send*
-- [ ] `Toggle` widget (7.3) is the first client of this: wire it to 11.2's send path instead of
+      `schema.commands` in `lib/crypto/device-schema.js`: `{ type, label?, args: [{ name, type,
+      min/max | max_bytes }] }`, identifiers `[a-z0-9_]` refused rather than cleaned, number
+      arguments must carry both bounds. Additive to schema v1: an older client reading it drops
+      `commands` like any unknown key. A switch field links to one with `command`, and only to
+      the idempotent shape (one boolean named `value`, "set state to X"), which is how 11.0's
+      steer towards idempotent commands is enforced rather than suggested. A bad command is
+      dropped on read and its switch goes read-only; a field-only save keeps declared commands
+      (`setDeviceSchema` defaults them to what is stored). The Fields form declares a switch's
+      command by name (`withSetStateCommands`); there is no form for other command shapes yet,
+      deliberately, since nothing on the dashboard can send them
+- [x] `Toggle` widget (7.3) is the first client of this: wire it to 11.2's send path instead of
       leaving it read-only
-- [ ] Bound argument size and type the way 10.2 bounds a notification message — a device that
+      `ToggleWidget` in `DeviceDashboard.jsx` with `app/src/lib/send-command.js`: re-read the
+      vault, check against the schema as it is now, reserve `command_seq` and write the vault,
+      then derive, encrypt, post, zero. **The switch draws what the device reported, never
+      what was asked for**; the line under it says what was asked and that it lands when the
+      device next checks and reports back. Only offered once the device has reported a state
+- [x] Bound argument size and type the way 10.2 bounds a notification message — a device that
       can be sent an arbitrarily large payload has a new resource-exhaustion surface it didn't
       have when it was only ever a writer
+      `buildCommandArgs` refuses missing, extra, mistyped and out-of-bounds arguments before
+      anything is reserved; text arguments are capped at 120 bytes (64 by default), 8 arguments
+      a command, 16 commands a schema. The firmware already refuses a sealed command above its
+      1100-byte buffer, and `encryptCommand` refuses a plaintext above the server's 1024. Wire
+      format written up in `docs/protocol.md`, section 8, "Commands"
+
+> 12 tests in `test/command-schema.test.js` (suite is 257), including that built arguments open
+> under `decryptCommand` and that `__proto__` is an argument rather than a prototype write. **Not
+> run against a server or a board**: no command has been sent from the screen yet. One edge is
+> known and not handled: between a rotation's promote and its board write (8.4), the vault holds
+> the new secret and the board the old, and a command sent in that window will not open on the
+> board, which skips and acks it. Rotation's own screen is where that window is visible.
 
 ---
 
