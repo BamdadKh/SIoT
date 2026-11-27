@@ -113,9 +113,11 @@ Granular, ordered task list derived from `SIoT_Design_Document.md`. Check items 
 - [x] Route `GET /salt?username=` on server — `cache-control: no-store`, since a cached decoy that later disagrees with a real salt leaks the moment the account is created
 - [x] Real user → return stored salt
 - [x] Unknown user → return `HMAC(server_secret, username)` truncated/formatted to look like a real salt — new required `SERVER_SECRET` env var (base64url, ≥32B, boot fails if short). Both branches run the same lookup *and* the same HMAC in the same order; the decoy is computed even when discarded, so no branch depends on existence
-- [ ] Test: response shape/timing is indistinguishable for real vs. fake usernames (at least structurally)
+- [x] Test: response shape/timing is indistinguishable for real vs. fake usernames (at least structurally) (`backend/test/salt.test.ts`: status, body keys, salt length, content-length, content-type, cache-control and the set of header names compared; the decoy is stable per name; 100 interleaved timings are checked only loosely, since a strict timing assertion in a shared run is a flaky test rather than a property)
 
-> Verified by hand, not by an automated test, and the checkbox stays open until it is one.
+> Verified by hand first, and now by an automated test: `backend/` has a harness (`npm test`,
+> `node --test` with `tsx`, the real app through `inject` against a disposable `siot_test`
+> database). The note below is what the hand probe found.
 > A throwaway probe over 200 interleaved requests found no difference: identical status,
 > body keys, `content-length` (33), `cache-control`, and 16-byte salt, with p50 0.92 ms for
 > both real and unknown names. Automating it needs a backend test harness that boots the app
@@ -576,6 +578,12 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
       unregistered device and confirm each takes its one step and no more; kill the vault
       write after the server delete and confirm the device lands in `UNREGISTERED` rather than
       anywhere new; confirm a second account gets 404 deleting the first account's device
+> **The server half is automated** in `backend/test/devices.test.ts`: records, both grant
+> directions and queued commands are gone from Postgres after a delete, the `DEVICE_ID`
+> registers again, a second account's 404 is byte-identical to a nonexistent device's, and a
+> deleted device uploading gets the 404 firmware latches on. **The vault half is not**: the
+> orphan and unregistered single-step paths and the killed-vault-write case are client code
+> with no harness that reaches a screen, so the box stays open.
 
 > **The client half is built and not yet walked.** `deleteDevice` in `app/src/lib/api.js` folds
 > a 404 into success, for the reason the item two above gives: the endpoint answers 404 for

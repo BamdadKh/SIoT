@@ -93,7 +93,18 @@ cp .env.example .env            # first time only
 npm run gen-cert                # first time only, self-signed dev TLS cert
 npm run migrate:up              # apply migrations
 npm run dev                     # https://localhost:3030
+npm test                        # node --test against a disposable siot_test database
 ```
+
+`npm test` in `backend/` creates `siot_test` on the compose Postgres if it is missing,
+migrates it with the real migrations, wipes it and Redis database 15, then drives
+`buildApp()` through Fastify's `inject` (`test/helpers.ts`). It never reads `.env`, and
+`scripts/test-db.js` refuses to wipe a database whose name does not end in `_test` or Redis
+database 0. TLS stays on: `inject` opens no socket, so there is no plaintext mode to add.
+Client-derived values are random bytes of the right length, because the server cannot tell
+the difference; devices get real Ed25519 keys and records are signed from the layout in
+`docs/protocol.md`, not from `src/lib/seq.ts`, so a bug there fails a test rather than
+matching one. Tests never import `frontend/lib/crypto/`.
 
 The frontend is one package holding the React client, the test console, and the crypto:
 
@@ -424,9 +435,11 @@ values the machine owns rather than the person. Argon2id's ~1s gets an honest la
 indeterminate bar, never a spinner or a fake percentage, since the wait is the security
 property working.
 
-`backend/` has no test harness. Everything so far was verified by hand against a running
-server; the frontend's `node --test` suite covers `lib/crypto/` only, and nothing covers
-the React screens. Phase 2.5 onwards is where that stops being tenable.
+`backend/` had no test harness through every phase below; each was verified by hand against
+a running server, and the "no automated test" notes in them are history. It has one now
+(see "Running it"): 25 cases covering `/salt` indistinguishability, the three record checks
+and their races, device registration and the cascading delete, the vault compare-and-swap,
+grant ownership, and the command queue's signed ack. Nothing covers the React screens.
 
 `firmware/esp32/esp32.ino` is the old unencrypted spike and **no longer works against this
 server**. Its `POST /button` endpoint is gone and the server is HTTPS-only. That is intended;
