@@ -1210,8 +1210,24 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 - [ ] Test: from the server's side, a run with events and a run without are indistinguishable in size, count and schedule
 
 ### 9.5 Flash encryption documentation
-- [ ] Write hardening guide: enabling ESP32 flash encryption + secure boot fuses
-- [ ] Clearly document irreversibility
+- [x] Write hardening guide: enabling ESP32 flash encryption + secure boot fuses
+      `docs/hardening.md`. **Writing it found that the item as stated would not protect the
+      secret**: ESP32 flash encryption leaves NVS partitions out, and `siot` is NVS, so a board
+      with only the flash-encryption and secure-boot fuses burned still holds `DEVICE_SECRET`
+      in plaintext. The guide says so at the top, design 6.2 and 13 are corrected, and the
+      firmware half is the new item below. It also states what release mode costs this
+      project's own flow (no re-provisioning, no rotation, no `SIOT ERASE`, no sketch updates,
+      since all of those are serial flashes), why a provisioned board must be provisioned again
+      as a new device rather than with its old secret (a lost `boot_epoch` reuses nonces), and
+      that none of it can be enabled from the Arduino IDE. Written from the ESP-IDF
+      documentation, **not tried on a board**
+- [x] Clearly document irreversibility
+      At the top of the guide, in the mechanisms table, and at the last step
+- [ ] Firmware: NVS encryption for the `siot` partition. An `nvs_keys` partition taken from the
+      end of `spiffs` (never by moving `siot`), and both the provisioning listener and the
+      library opening `siot` through `nvs_flash_secure_init_partition` instead of plain
+      `Preferences`. Needs an ESP-IDF build and a board to verify on, and a spare board for
+      the fuses
 
 ---
 

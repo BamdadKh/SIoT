@@ -219,7 +219,7 @@ What a port has to supply for itself, all of which the ESP32 library handles:
 ### 6.2 Consequences worth stating plainly
 
 - **User-authored firmware cannot be hash-verified.** Section 10's verification therefore covers the web client and official library releases only. The extension can tell you the library you pulled is the published one but cannot vouch for the sketch you wrote around it.
-- **NVS is plaintext flash unless ESP32 flash encryption is fused.** Anyone with physical possession and a USB cable can read `DEVICE_SECRET` out. This sits inside the already-accepted physical-access risk, but deployments that care should burn the flash-encryption and secure-boot fuses. Document it as a recommended hardening step and note that it is irreversible.
+- **NVS is plaintext flash unless NVS encryption is on, and flash encryption alone does not turn it on.** Anyone with physical possession and a USB cable can read `DEVICE_SECRET` out. ESP32 flash encryption leaves NVS partitions out by design; protecting `siot` needs NVS encryption, which keeps its keys in an `nvs_keys` partition that flash encryption does cover. This sits inside the already-accepted physical-access risk, but deployments that care should burn the flash-encryption and secure-boot fuses *and* enable NVS encryption. The steps, what they cost SIoT's provisioning flow, and why each is irreversible are in `docs/hardening.md`.
 - **Revealing credentials (5.3.1) moves the secret somewhere none of the above covers: the user's own machine.** It passes through the clipboard and comes to rest wherever they put it, where a synced editor, a backup, or a stray `git add` reaches it. Nothing in this document protects it after that point. This is the reason reveal is an escape hatch behind a deliberate action rather than a second supported path — the guarantee genuinely stops there, and a flow that made it look routine would be lying about where the boundary is.
 
 ---
@@ -470,7 +470,7 @@ Whatever is chosen, the recovery credential must be at least as strong as the pa
 | Weak passwords | User choice, outside the system's control; mitigated by Argon2id and login rate limiting |
 | **Permanent lockout** | No recovery path in v1 because forgetting the password destroys the account (Section 12) |
 | Social engineering | Includes a user approving a malicious update without reading the diff |
-| Physical device access | Accepted tradeoff because the same USB requirement kills remote provisioning attacks. NVS is plaintext unless flash encryption is fused |
+| Physical device access | Accepted tradeoff because the same USB requirement kills remote provisioning attacks. NVS is plaintext unless NVS encryption is on, which flash encryption alone does not provide (`docs/hardening.md`) |
 | **Revealed credentials** | Only if the user deliberately reveals them (5.3.1) to port to other hardware. `DEVICE_SECRET` leaves the vault into the clipboard and whatever they do next is outside this document's guarantees |
 | Memory scraping | Only relevant if the device is already compromised |
 | Unverified web client code | For anyone without the extension, a server that swaps the client JavaScript can read the password and vault at the next sign-in or unlock. Cryptography cannot stop the party that ships the crypto code (Section 10) |
