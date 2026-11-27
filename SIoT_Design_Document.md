@@ -348,11 +348,25 @@ This must be surfaced in the UI before a grant is created. A user who believes "
 
 A minimal, deliberately non-updating browser extension (~100 lines, open source) is the trust anchor for the code the user runs. **The extension is optional.**
 
-- **On install:** no stored hash exists, so the extension forces code review, the user approves, and the hash is stored locally.
-- **On update:** when a hash mismatch is detected, the extension fetches raw code from GitHub, computes its own hash (never trusting a claimed hash), shows a diff, and waits for user approval.
+- **On install:** no stored hash exists, so the extension forces code review, the user approves, and the hash is stored locally. That approved version is the user's pinned trust root.
+- **On update:** when a hash mismatch is detected, the extension fetches raw code from GitHub, computes its own hash (never trusting a claimed hash), shows a diff against the pinned version, and waits for user approval. Until the user approves, the new code is not trusted.
 - Applies to site code, official library releases, and custom widget plugins (Section 11).
 
-Being optional matters for the threat model because the core zero-knowledge guarantees hold with or without the extension since they are enforced by cryptography, not by the extension. What it adds is protection against a separate threat: a compromised server serving altered JavaScript to the browser, a standard web supply-chain attack. Without it, unverified web client code is part of the residual attack surface (Section 13).
+The intended end state is that every byte of client code a user's keys pass through is a version that user approved, so the remaining point of failure is the user's own review. Sections 10.2 to 10.5 are about how much weight that sentence can actually bear.
+
+**What the cryptography guarantees without the extension, stated honestly.** Every other section of this document assumes the browser is the trust boundary. But the server delivers the JavaScript that runs in that browser. A server that is merely breached at rest (a database dump, a stolen backup) learns nothing, and that holds with or without the extension. A server whose operator, or whoever compromised it, *actively swaps the client code* can serve a page that reads the password at the next sign-in, or the vault and every `DEVICE_SECRET` in it at the next unlock. Cryptography cannot prevent that, because the attacker is shipping the code that does the cryptography. This is the standard objection to browser-based end-to-end encryption, and it applies here in full.
+
+So the extension is optional in the sense that nothing breaks without it, not in the sense that the guarantees are the same without it. Without it, the zero-knowledge claim holds against a server that stores honestly and serves the real client; with it, it holds against a server that does neither, up to the limits in 10.1 and 10.3. Unverified web client code is part of the residual attack surface (Section 13) for anyone who has not installed it.
+
+### 10.0 What is verified: the code the browser receives
+
+The extension verifies **the client code the browser actually receives**. It does not, and cannot, verify what the server is running. A server cannot prove what code it runs: any hash it reports about itself is a claim, and remote attestation is a different and much harder problem that this design does not attempt.
+
+It also does not need to. The server is untrusted by design and never holds a plaintext secret, so what it runs does not matter. What matters is the code that runs where the keys are, and that code passes through the browser, where the extension can hash it without asking the server anything.
+
+Write-ups and explanations of this system should use the first phrasing ("the extension verifies the client code the browser receives") and never the second ("the server proves its source code"). The second reads as a remote-attestation claim, which a security reviewer will rightly reject.
+
+Comparing the received bundle against published source only means something if the build is **reproducible**: anyone building the published commit must get a byte-identical bundle. Otherwise the diff a user approves is of source that may not correspond to the bundle they are running, and the review is theatre. Reproducible builds are therefore a prerequisite of the extension, not an improvement to it.
 
 ### 10.1 Feasibility constraints
 
@@ -362,6 +376,47 @@ Two things need resolving before this ships, and neither is a detail:
 - **"No auto-update" conflicts with the Chrome Web Store** because it updates extensions silently. Honoring the no-auto-update property requires self-hosting or unpacked developer-mode installation, both of which hurt adoption enough to affect whether anyone actually runs the extension.
 
 A hash-pinning extension that verifies only the entry HTML while a hashed SPA bundle loads separately would be checking the wrong thing entirely. Whatever ships must cover every executed subresource.
+
+### 10.2 The extension's own update channel
+
+The extension is the root of the whole scheme, so whoever can update it can bypass it. A store that auto-updates the extension hands that power to the store account, and to anyone who compromises it. This is why "no auto-update" is a property and not a preference (10.1), and why the extension's source, release signing and distribution must not share infrastructure with the SIoT server. An extension updated by the same party it is meant to check is not checking anything.
+
+### 10.3 Review fatigue and the minimal trusted core
+
+"The only point of failure is the user's own judgement" is true and is a much bigger weakness than it sounds. Nobody reads diffs properly: by the third approval prompt people click Approve, and very few users can evaluate a change to cryptographic code at all. A design that prompts on every UI tweak has trained its users to approve everything, including the one update that matters.
+
+The answer is structural, not a better diff viewer:
+
+- **A minimal trusted core.** Everything that touches the password, `master_key`, `kek`, `vault_key` or a `DEVICE_SECRET` lives in a small, separately loaded core: the crypto in `frontend/lib/crypto/`, the vault store, provisioning. It should be a few hundred lines that almost never change. The UI, which changes constantly, runs outside it and can never touch key material, only what the core chooses to hand it (the same discipline 11.2 applies to widget plugins).
+- **Pin the core, not the whole app.** The extension's prompts are then about the core alone, which makes them rare and small enough to actually be read. UI changes can be checked for integrity and transparency (10.4) without asking the user to review them.
+- **Delegated review.** A user who cannot read the diff can choose auditors they trust, or rely on the public log having been checked by others, and approve on the strength of that. The decision stays the user's; the reading need not be.
+
+The current client does not have this split. `lib/crypto/` is already physically separate, but the React app imports it into one bundle, so the boundary is a directory, not an isolation boundary. Building the split is the first real piece of work the extension needs (roadmap Phase 12).
+
+### 10.4 Targeted attacks and transparency
+
+Pinning protects a user who has already pinned. It does not protect a first install, and it does not stop a server sending ordinary code to everyone except one victim, who then sees a diff that nobody else ever saw and has no way to know that.
+
+A **public, append-only transparency log** of every released client version closes both. Each release is logged; the extension refuses (or loudly warns about) any version not in the log; and because everyone checks against the same log, a version served to one person alone is detectable by construction. This is binary transparency applied to a web client. First-install users get "the same thing everyone else got" even before they have pinned anything.
+
+### 10.5 Prior work and what is different here
+
+The closest existing system is Meta's **Code Verify** (2022), a browser extension that checks the WhatsApp Web code served to the browser against a hash of the version WhatsApp published through Cloudflare, with the extension kept independent of Meta's own infrastructure. The general idea is **binary transparency**, and that is the literature this section sits in.
+
+"An extension that checks code hashes" is therefore not new. What SIoT does differently:
+
+- **The trust root is the user's pinned approval**, not a company's published source of truth.
+- **Change is reviewed as a diff** against what the user approved, with delegation (10.3), rather than a pass/fail against a vendor hash.
+- **A minimal trusted core** (10.3) keeps that review small enough to be real.
+- **It is applied to IoT pairing.** The secrets at stake are device credentials, and the same question extends to the device side: which firmware is a board running? Signed device records (Section 7) and the published library releases already give half of that answer; user-authored sketches remain unverifiable (6.2).
+
+Any write-up must be able to state these differences precisely, because "how is this different from Code Verify?" is the first question it will be asked.
+
+### 10.6 As a research direction
+
+Combining well-known pieces correctly is good engineering, not research. This section is where SIoT could become research: user-pinned web binary transparency with a minimal trusted core, applied to zero-knowledge IoT pairing, with a clear threat model of what a malicious server can and cannot do, evaluated on real ESP32 hardware (pairing time, update overhead, memory) and with a usability study of the approval flow. That evaluation, more than the extension itself, is what would make it a contribution.
+
+It is deliberately not on the critical path of the product. The first step is reading: Code Verify's write-up and repository, and the binary-transparency and browser-crypto-trust literature, so that the contribution is defined against the closest existing systems before more is built.
 
 ---
 
@@ -418,7 +473,8 @@ Whatever is chosen, the recovery credential must be at least as strong as the pa
 | Physical device access | Accepted tradeoff because the same USB requirement kills remote provisioning attacks. NVS is plaintext unless flash encryption is fused |
 | **Revealed credentials** | Only if the user deliberately reveals them (5.3.1) to port to other hardware. `DEVICE_SECRET` leaves the vault into the clipboard and whatever they do next is outside this document's guarantees |
 | Memory scraping | Only relevant if the device is already compromised |
-| Unverified web client code | Only a risk if the browser extension is not installed, which is optional and not required for the core crypto guarantees |
+| Unverified web client code | For anyone without the extension, a server that swaps the client JavaScript can read the password and vault at the next sign-in or unlock. Cryptography cannot stop the party that ships the crypto code (Section 10) |
+| Approving a malicious client update | With the extension, the user's review is the last check. Mitigated by a minimal trusted core that keeps prompts rare and small, delegated review, and a public transparency log (10.3, 10.4) |
 | **Metadata leakage** | Inherent to the architecture and significant for IoT (see below) |
 | **Availability and withholding** | The server can refuse, stall, or delete. Cryptography detects lies but cannot compel service |
 | **Compromised device holding a grant** | Reads everything the grant covers, including full history; revocation requires physical re-provisioning (Section 9.3) |
@@ -443,7 +499,7 @@ Every purely software-level trust assumption in the server has been eliminated b
 |---|---|
 | Frontend | React + Web Crypto API |
 | Backend | Node.js + TypeScript + Fastify |
-| Extension | Vanilla JS, ~100 lines, no build step, no auto-update, optional |
+| Extension | Vanilla JS, ~100 lines, no build step, no auto-update, optional; verifies the client code the browser receives against a user-pinned version, a reproducible build and a transparency log |
 | Firmware | C++ library, Arduino-compatible; published protocol spec for third-party ports |
 | Provisioning | Web Serial API (in-browser), writes NVS credentials only. Reveal-credentials escape hatch for third-party ports (5.3.1) |
 | Transport | HTTPS / TLS 1.3, HSTS preload, SPKI pinning on devices |
@@ -471,6 +527,9 @@ The architecture is settled in shape. These remain genuinely open and should be 
 5. **Metadata mitigation** (Section 13.1) — whether any device class warrants padded fixed-interval uploads in v1.
 6. **Vault record granularity** — one blob versus per-record encryption, affecting sync cost and how precisely `vault_version` rollback can be detected.
 7. **Rollback resolution path** (Section 8) — a caught rollback currently has no way past it short of the server serving a newer version again. Whether a deliberate, friction-heavy "accept this older version anyway" control belongs in the client, and if so what it should cost the person choosing it.
+8. **Trusted-core isolation** (Section 10.3): what boundary keeps the UI from touching key material (a separate origin, a sandboxed iframe, a Worker), given that the core must stay small enough to review by hand.
+9. **Transparency log** (Section 10.4): who runs it, how the extension checks inclusion, and whether an off-the-shelf log is good enough.
+10. **Reproducible client build** (Section 10.0): whether Vite's output can be made byte-identical across machines, and what has to be pinned to get there.
 
 ---
 
@@ -497,4 +556,5 @@ The architecture is settled in shape. These remain genuinely open and should be 
 | Availability added as accepted risk | 1, 13 | Clarifies the achievable guarantee: withhold yes, lie undetected no |
 | Schema validation & plugin sandboxing | 11.1, 11.2 | Decrypted third-party content reached the DOM and key material |
 | MV3 / Web Store feasibility flagged | 10.1 | Blocking interception and no-auto-update may not both be achievable |
+| Client verification made precise | 10, 10.0, 10.2 to 10.6, 13 | The extension verifies the client code the browser receives, not the server; reproducible builds, the extension's own update channel, review fatigue, targeted attacks and prior work (Code Verify) are now stated. The claim that the zero-knowledge guarantees hold equally without the extension was wrong and is corrected |
 | "No open decisions remaining" replaced | 15 | Six were outstanding |

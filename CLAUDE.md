@@ -81,7 +81,7 @@ firmware/      SIoT/          the device library (Phase 5), Arduino, ESP32 only
                esp32/         the dead unencrypted spike, kept for reference only
 docs/          protocol.md    the published wire contract for third-party clients
                vectors/       known-answer vectors, generated and re-checked by the suite
-extension/     Client-verification browser extension (Phase 9, empty)
+extension/     Client-verification browser extension (Phase 12, not started)
 ```
 
 ## Running it

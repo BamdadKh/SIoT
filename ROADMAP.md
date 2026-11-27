@@ -1174,11 +1174,9 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 ## Phase 9 — Hardening & Extras (post-MVP)
 
 ### 9.1 Browser extension
-- [ ] Minimal (~100 line) extension skeleton, no build step
-- [ ] On-install hash storage flow
-- [ ] On-update: fetch from GitHub, hash, diff, require approval
-- [ ] Decide distribution: self-hosted vs Web Store (Section 15.3)
-- [ ] Investigate CSP + SRI approach to cover MV3's lack of blocking `webRequest`
+
+> Moved to **Phase 12**, which expands it. The five items that were here are all in 12.3 and
+> 12.4; this heading stays so existing "9.1" references still land somewhere.
 
 ### 9.2 Widget plugin sandbox
 - [ ] Sandboxed iframe/Worker execution model
@@ -1490,6 +1488,72 @@ its own phase, not an item folded in here.
 - [ ] Bound argument size and type the way 10.2 bounds a notification message — a device that
       can be sent an arbitrarily large payload has a new resource-exhaustion surface it didn't
       have when it was only ever a writer
+
+---
+
+## Phase 12: Client Verification Extension
+
+> **The number is not the order, and this is not on the product's critical path.** It depends
+> on nothing past Phase 3 and blocks nothing. It is the one part of SIoT that could be research
+> rather than engineering (design 10.6), so it is planned as a longer piece of work, not
+> squeezed in. Numbered 12 rather than kept as 9.1 because it outgrew a sub-item.
+
+The extension pins the client code a user approved and verifies every later version the browser
+receives against it, showing a diff and waiting for approval. Design Section 10 is the
+specification; this phase is the order to build it in.
+
+### 12.0 The decisions this rests on
+
+Read these before ticking anything below, the same way 10.0 and 11.0 have to be read first.
+
+**The extension verifies what the browser receives, never what the server runs.** The server
+cannot prove what it runs, and does not need to, because it holds no plaintext. Any hash the
+server reports about itself is a claim and is never used. The extension hashes the bytes it was
+served. Write-ups say "verifies the client code the browser receives", never "the server proves
+its source code" (design 10.0).
+
+**Without a reproducible build, the diff is theatre.** A diff of published source means nothing
+unless building that source yields the exact bundle being served. Reproducibility comes before
+any extension code.
+
+**Pin a small core, not the whole app.** If every UI tweak raises a prompt, users learn to click
+Approve. The key-handling code has to become a small, rarely changing core the UI cannot reach
+into, so that what the user reviews is rare and short enough to read (design 10.3).
+
+**The extension's own updates must not come from the party it checks.** A store that
+auto-updates it, or a release pipeline shared with the SIoT server, is a bypass (design 10.2).
+
+### 12.1 Related work first
+- [ ] Read Meta's Code Verify write-up and its repository; note exactly how it works and what it trusts
+- [ ] Survey binary transparency, browser-based E2EE trust, and E2EE / untrusted-cloud IoT designs
+- [ ] Write down, in design 10.5, the precise differences from the closest systems, before building
+
+### 12.2 Prerequisites in the client
+- [ ] Reproducible client build: two clean builds of one commit on two machines are byte-identical
+- [ ] Split a minimal trusted core (crypto, vault store, provisioning) from the UI, behind a real isolation boundary (design 15.8)
+- [ ] Confirm the UI side never receives raw key material, only what the core hands it (same rule as 9.2)
+- [ ] Release manifest listing the hash of every executed subresource, not just the entry HTML (design 10.1)
+
+### 12.3 Extension core
+- [ ] Minimal (~100 line) extension skeleton, vanilla JS, no build step
+- [ ] On-install flow: force review, user approves, store the pinned hash locally
+- [ ] On-update: fetch from GitHub, hash it locally, diff against the pinned version, require approval
+- [ ] Never trust a server-supplied hash anywhere in the flow
+- [ ] Cover official firmware library releases and widget plugins as well as the site (design 10)
+
+### 12.4 Enforcement and distribution
+- [ ] Investigate CSP + SRI so the browser enforces what the extension audits, given MV3 has no blocking `webRequest` (design 15.2)
+- [ ] Decide distribution: self-hosted vs Web Store, and how no-auto-update survives it (design 15.3)
+- [ ] Extension releases signed and hosted independently of the SIoT server's infrastructure
+
+### 12.5 Transparency and delegated review
+- [ ] Public append-only log of every released client version; extension rejects versions not in it (design 10.4, 15.9)
+- [ ] Let a user delegate review to auditors they choose, without the decision leaving the user
+
+### 12.6 Evaluation (the research half)
+- [ ] Threat model: exactly what a malicious server can and cannot do with and without the extension
+- [ ] Measure on real ESP32 hardware: pairing time, update overhead, memory
+- [ ] Usability check of the approval flow: do people actually read the diff, and how often are they asked
 
 ---
 
