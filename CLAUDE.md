@@ -707,12 +707,32 @@ range. Verified by a throwaway probe, 35 checks, including that a page stays con
 and a gap at a page edge unclaimable. **Not walked in a browser**: no Chrome session was
 available, same gap 4.9 recorded.
 
-**Phase 10, device notifications, is in the roadmap and unbuilt.** Its three load-bearing
+**Phase 10, device notifications, is built through 10.4.** Its three load-bearing
 decisions live in ROADMAP.md 10.0 and are the kind that get reversed by accident: a
 notification is an ordinary record on the ordinary path; the record type stays inside the
 ciphertext and never in the AAD (a distinguishable alert record is a labelled event log, and
 the accepted cost is that the server cannot trigger delivery); and a symmetric key that can
 write can also read, so "notification write key" cannot mean what it sounds like.
+
+Every record is opened through `openRawRecord` (`app/src/lib/record-keys.js`), which tries the
+data key and then the notify key and tags the record's `kind`; Readings, the dashboard, the
+export and the notification poll all go through it, and `readRecord` in `records.js` is the one
+reading of the result. A notification sits in its device's Readings at its own `seq`, because
+the two share one sequence and pulling it out would look like a gap. `components/Notifications.jsx`
+on Devices is fed by `lib/use-notifications.js`: every paired device's newest page, every minute
+while the tab is visible, polled alike so the request pattern says nothing about which devices
+alert. `mergeNotifications` is a k-way merge, not a sort: within a device the order is the
+signed `seq`, across devices the server's arrival time, and the screen says which. Read state is
+`notifications_seen_through` on the vault entry (`markNotificationsSeen`, forward-only), never on
+the server. 10.5 is an open decision.
+
+**Phase 11.5 is built: a schema declares commands, and a switch sends one.** `schema.commands`
+in `device-schema.js` is the allowlist for what a dashboard may send; `buildCommandArgs` refuses
+anything outside it before a `command_seq` is reserved. A switch links only to the idempotent
+shape (one boolean named `value`), and it keeps drawing what the device *reported*, never what
+was asked for. `lib/send-command.js` is the order: re-read, check, reserve and write the vault,
+then derive, encrypt, post, zero. `setDeviceSchema` keeps stored commands when given none, so a
+field-only save cannot erase them. Neither phase has been walked against a server or a board.
 
 **Phase 11 has a backend-only slice done: `POST`/`GET /devices/:id/commands` and the whole of
 11.4's ack/prune.** `src/routes/commands.ts`. The write side is session-authenticated and
@@ -774,7 +794,7 @@ order, reordered from Fields; the drag-and-drop grid was left unbuilt on purpose
 rebinds `sign_pub` (password required) and returns the `seq` boundary; the vault entry keeps
 retired secrets so history still opens. Routes now include `/grants` and `/devices/:id/rotate`.
 
-The frontend suite is 233 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
+The frontend suite is 257 `node --test` cases, up from 109. `device-list.js`, `last-seen.js`,
 `sequence.js`, `records.js`, `provisioning-protocol.js` and `cbor.js` are React-free so the
 suite reaches them directly, and `protocol-vectors.test.js` re-derives every published vector
 from scratch.
