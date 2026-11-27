@@ -32,7 +32,7 @@
  * `node --test` cannot resolve the alias. One check, not a second copy of it.
  */
 
-import { readPayload, sequenceSteps } from './records.js';
+import { readRecord, sequenceSteps } from './records.js';
 
 /**
  * @param {{ fields: Array<{ key: string, type: string, widget: string,
@@ -47,7 +47,9 @@ import { readPayload, sequenceSteps } from './records.js';
  */
 export function buildDashboard(schema, records, matches) {
   if (!schema) return [];
-  const opened = records.map((record) => (record.error ? null : readPayload(record.payload)));
+  // A notification reads as a record with no readings: it is stepped over, not a
+  // break in a line, since nothing is missing from the sequence (roadmap 10.3).
+  const opened = records.map((record) => (record.error ? null : readRecord(record)));
 
   return schema.fields.map((field) => ({
     field,

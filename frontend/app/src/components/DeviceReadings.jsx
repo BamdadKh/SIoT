@@ -3,9 +3,13 @@ import {
   describeDeviceTime,
   describeStepText,
   formatReading,
-  readPayload,
+  readRecord,
   sequenceSteps,
 } from '../lib/records.js';
+import { NotificationBody } from './NotificationBody.jsx';
+
+// Re-exported for the callers that already reach it through this component.
+export { readRecord };
 import { describeSequence } from '../lib/sequence.js';
 
 /**
@@ -29,6 +33,10 @@ import { describeSequence } from '../lib/sequence.js';
  * `cbor.js` does (deterministically, for the published vectors). Re-sorting
  * here would take that choice away from the ports that do keep a meaningful
  * order, and would buy nothing from the ones that do not.
+ *
+ * **Notifications sit in the same list** (roadmap 10.3), at the `seq` they were
+ * sent at. They share the device's one sequence (10.2), so pulling them out
+ * would leave a hole between two readings that looked exactly like a gap.
  *
  * **Both timestamps, never collapsed into one.** The device's own `t` is inside
  * the authenticated payload but comes from a clock nothing verifies; the arrival
@@ -209,7 +217,9 @@ function Record({ record, read: parsed, showDeviceTime, schema }) {
         </span>
       </div>
 
-      {parsed.problem ? (
+      {parsed.kind === 'notification' ? (
+        <NotificationBody notification={parsed.notification} />
+      ) : parsed.problem ? (
         <p className="record-problem">{parsed.problem}</p>
       ) : (
         <dl className="record-readings">
@@ -249,12 +259,6 @@ function Record({ record, read: parsed, showDeviceTime, schema }) {
 
 /** How a declared type reads in a sentence. */
 const TYPE_NAMES = { number: 'a number', boolean: 'on or off', text: 'text' };
-
-/** @param {{ payload: unknown, error: string|null }} record */
-export function readRecord(record) {
-  if (record.error) return { deviceTime: null, readings: [], unsupported: [], problem: null };
-  return readPayload(record.payload);
-}
 
 /**
  * The arrival time, exact rather than relative. The device list uses relative

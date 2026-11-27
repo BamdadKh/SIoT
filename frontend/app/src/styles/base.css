@@ -1082,6 +1082,61 @@ section.device-section .record-list {
   color: var(--rust-deep);
 }
 
+/* --- notifications (roadmap 10.3, 10.4) ---------------------------------- */
+
+/*
+ * A notification is a `.record` row wherever it appears, in its device's
+ * Readings or in the list on Devices. Severity is a word, not a colour: the
+ * palette has no token for "a device is shouting", and `--alarm` (what the
+ * person did) and `--rust` (what the client cannot read) are both wrong for it.
+ */
+.notification-body {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--size-small);
+  line-height: 1.55;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.notification-severity {
+  font-size: var(--size-label);
+  color: var(--ink-muted);
+}
+
+.notification-loud {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* The list on Devices sits under the device list as a second register. */
+.notifications {
+  margin-top: var(--sp-5);
+}
+
+.notifications-count {
+  margin-left: var(--sp-3);
+  font-size: var(--size-small);
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+.notification-source {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Unread is said with the left rule `.device-note` already uses for "this row
+   has something to say", in neutral ink: it is a fact about what this browser
+   has shown, not an action and not a failure. */
+.notification-unread {
+  box-shadow: inset 2px 0 0 var(--line-strong);
+}
+
+.device-liveness .device-unread {
+  display: block;
+  color: var(--ink);
+}
+
 /* --- declared fields (roadmap 7.1) --------------------------------------- */
 
 /*

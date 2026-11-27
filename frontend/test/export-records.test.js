@@ -37,7 +37,7 @@ function serverWith(pairs) {
 /** Opens every record as `{ t, r: { n: <index> } }` unless told a ciphertext is bad. */
 const opener = (payloadFor, refuse = new Set()) => async (raw) => {
   if (refuse.has(raw.ciphertext)) throw new Error('This record did not open.');
-  return payloadFor(raw);
+  return { kind: 'reading', payload: payloadFor(raw) };
 };
 
 const exportOf = (records, extra = {}) => ({

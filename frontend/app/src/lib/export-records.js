@@ -37,7 +37,7 @@
  * fetch and the decryption are injected; `export-device.js` supplies the real ones.
  */
 
-import { describeStepText, readPayload, sequenceSteps } from './records.js';
+import { describeStepText, readRecord, sequenceSteps } from './records.js';
 import { splitSeq } from './sequence.js';
 
 /** The route's own maximum (roadmap 6.2). Fewer round trips than the screen's 50. */
@@ -59,12 +59,14 @@ export const EXPORT_FORMAT = 'siot-export/v1';
  * @param {(afterSeq: string|undefined) => Promise<Array<{ seq: string, nonce: string,
  *          ciphertext: string, created_at: string }>>} options.fetchPage ascending,
  *        strictly after the cursor, at most `pageSize`.
- * @param {(record: object) => Promise<unknown>} options.openRecord the decoded
- *        payload, or a throw for a record that will not open.
+ * @param {(record: object) => Promise<{ kind: 'reading'|'notification'|'malformed-notification',
+ *        payload?: unknown, notification?: object }>} options.openRecord what the record
+ *        turned out to be (roadmap 10.3), or a throw for a record that will not open.
  * @param {(progress: { fetched: number, unopened: number }) => void} [options.onProgress]
  * @param {AbortSignal} [options.signal]
  * @param {number} [options.pageSize] must match what `fetchPage` asks the server for.
- * @returns {Promise<Array<{ seq: string, receivedAt: string, payload: unknown, error: string|null }>>}
+ * @returns {Promise<Array<{ seq: string, receivedAt: string, kind: string|null, payload: unknown,
+ *   notification: object|null, error: string|null }>>}
  */
 export async function collectHistory({
   fetchPage,
@@ -89,11 +91,25 @@ export async function collectHistory({
         throw new Error('The server returned records out of order; the export was stopped.');
       }
       try {
-        const payload = await openRecord(raw);
-        records.push({ seq: raw.seq, receivedAt: raw.created_at, payload, error: null });
+        const opened = await openRecord(raw);
+        records.push({
+          seq: raw.seq,
+          receivedAt: raw.created_at,
+          kind: opened.kind,
+          payload: opened.kind === 'reading' ? opened.payload : null,
+          notification: opened.kind === 'notification' ? opened.notification : null,
+          error: null,
+        });
       } catch (failure) {
         unopened += 1;
-        records.push({ seq: raw.seq, receivedAt: raw.created_at, payload: null, error: failure.message });
+        records.push({
+          seq: raw.seq,
+          receivedAt: raw.created_at,
+          kind: null,
+          payload: null,
+          notification: null,
+          error: failure.message,
+        });
       }
     }
 
@@ -118,8 +134,10 @@ function describeRecords(records) {
   return records.map((record, index) => {
     const parts = splitSeq(record.seq);
     const step = steps.get(index);
-    const opened = record.error === null ? readPayload(record.payload) : null;
+    const opened = record.error === null ? readRecord(record) : null;
 
+    // A notification is its own status, not "ok with no readings": a file that
+    // cannot tell an alert from an empty reading has lost what the device said.
     let status = 'ok';
     let problem = null;
     if (record.error !== null) {
@@ -128,6 +146,9 @@ function describeRecords(records) {
     } else if (opened.problem !== null) {
       status = 'unreadable';
       problem = opened.problem;
+    } else if (opened.kind === 'notification') {
+      status = opened.notification ? 'notification' : 'unreadable';
+      if (!opened.notification) problem = 'A notification this version does not render.';
     }
 
     return {
@@ -140,6 +161,7 @@ function describeRecords(records) {
       unsupported: opened ? opened.unsupported : [],
       status,
       problem,
+      notification: opened?.notification ?? null,
       sequenceNote: step
         ? {
             kind: step.kind,
@@ -160,7 +182,8 @@ function isoFromSeconds(seconds) {
 function summarise(described) {
   return {
     recordCount: described.length,
-    unopenedCount: described.filter((row) => row.status !== 'ok').length,
+    unopenedCount: described.filter((row) => row.status === 'unopened' || row.status === 'unreadable').length,
+    notificationCount: described.filter((row) => row.status === 'notification').length,
     first: described.length > 0 ? described[0].seq : null,
     last: described.length > 0 ? described[described.length - 1].seq : null,
   };
@@ -217,6 +240,7 @@ export function buildJsonExport({ deviceName, deviceId, exportedAt, records }) {
     seq_range: { first: summary.first, last: summary.last },
     record_count: summary.recordCount,
     unopened_count: summary.unopenedCount,
+    notification_count: summary.notificationCount,
     timestamps: {
       received_at: "the server's clock when the upload arrived; only as trustworthy as the server",
       device_time_unix:
@@ -246,6 +270,14 @@ export function buildJsonExport({ deviceName, deviceId, exportedAt, records }) {
         problem: row.problem,
         sequence_note: row.sequenceNote,
         readings: row.status === 'ok' ? readings : null,
+        ...(row.notification
+          ? {
+              notification: {
+                severity: row.notification.severity,
+                message: row.notification.message,
+              },
+            }
+          : {}),
         ...(nonFinite.size > 0 ? { non_finite_readings: nonFinite } : {}),
         ...(row.unsupported.length > 0 ? { unsupported_readings: row.unsupported } : {}),
       };
@@ -266,6 +298,12 @@ const FIXED_COLUMNS = [
   'status',
   'sequence_note',
 ];
+
+/**
+ * Added after the fixed columns only when the history holds a notification, so
+ * a thermometer's export does not carry two columns that are empty on every row.
+ */
+const NOTIFICATION_COLUMNS = ['notification_severity', 'notification_message'];
 
 /**
  * One cell, quoted per RFC 4180.
@@ -289,8 +327,8 @@ function csvCell(value) {
  * merged into it, since the two would otherwise be one column of unrelated
  * things. The rename is deterministic so a second export lines up with the first.
  */
-function readingColumns(described) {
-  const taken = new Set(FIXED_COLUMNS);
+function readingColumns(described, fixed) {
+  const taken = new Set(fixed);
   const columnFor = new Map();
 
   for (const row of described) {
@@ -319,10 +357,12 @@ function readingColumns(described) {
  */
 export function buildCsvExport({ records }) {
   const described = describeRecords(records);
-  const columnFor = readingColumns(described);
+  const withNotifications = described.some((row) => row.status === 'notification');
+  const fixed = withNotifications ? [...FIXED_COLUMNS, ...NOTIFICATION_COLUMNS] : FIXED_COLUMNS;
+  const columnFor = readingColumns(described, fixed);
   const keys = [...columnFor.keys()];
 
-  const lines = [[...FIXED_COLUMNS, ...columnFor.values()].map(csvCell).join(',')];
+  const lines = [[...fixed, ...columnFor.values()].map(csvCell).join(',')];
 
   for (const row of described) {
     const byKey = new Map(row.readings.map(({ key, value }) => [key, value]));
@@ -336,6 +376,11 @@ export function buildCsvExport({ records }) {
       isoFromSeconds(row.deviceTime) ?? '',
       row.status,
       note,
+      // A device's own text, so it goes through the same formula defusing as a
+      // text reading: `csvCell` sees a string and treats it as one.
+      ...(withNotifications
+        ? [row.notification?.severity ?? '', row.notification?.message ?? '']
+        : []),
       ...keys.map((key) => (byKey.has(key) ? byKey.get(key) : '')),
     ];
 

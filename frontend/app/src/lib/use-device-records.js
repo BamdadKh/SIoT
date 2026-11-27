@@ -6,6 +6,12 @@
  * of the vault entry the same browser sealed at provisioning time. Nothing here
  * asks the server for anything but blobs, and nothing here sends it anything.
  *
+ * **Readings and notifications both come through here** (roadmap 10.3). Each
+ * record is tried under `device_data_key` and then `device_notify_key`
+ * (`openRawRecord`), and carries the `kind` it turned out to be. The two share
+ * one `seq` sequence on the device (10.2), so they share one list here too:
+ * splitting them would make every notification look like a gap in the readings.
+ *
  * **Keys are derived once per page and zeroed when the page is done.**
  * `device_data_key` is HKDF over a `DEVICE_SECRET` the vault holds, and a rotated
  * device holds several: each record opens under the secret `secretForSeq` picks
@@ -34,9 +40,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { decryptRecord, deviceIdBytes, fromBase64Url } from '@siot/crypto';
+import { deviceIdBytes } from '@siot/crypto';
 import { fetchRecords } from './api.js';
-import { openKeyRing } from './record-keys.js';
+import { openKeyRing, openRawRecord } from './record-keys.js';
 import { RECORDS_PAGE_SIZE } from './records.js';
 
 /**
@@ -89,25 +95,10 @@ export function useDeviceRecords(entry) {
 
         const ascending = [...raw].reverse();
         const opened = [];
+        // One at a time, in order: the ring derives a secret's pair on first use,
+        // and a page is fifty records, not enough to be worth racing.
         for (const record of ascending) {
-          const seq = BigInt(record.seq);
-          try {
-            const payload = await decryptRecord({
-              dataKey: await ring.keyFor(record.seq),
-              deviceId: idBytes,
-              seq,
-              nonce: fromBase64Url(record.nonce),
-              ciphertext: fromBase64Url(record.ciphertext),
-            });
-            opened.push({ seq: record.seq, receivedAt: record.created_at, payload, error: null });
-          } catch (failure) {
-            opened.push({
-              seq: record.seq,
-              receivedAt: record.created_at,
-              payload: null,
-              error: failure.message,
-            });
-          }
+          opened.push(await openRawRecord(ring, idBytes, record));
         }
 
         // A short page means the server had nothing more before the cursor.

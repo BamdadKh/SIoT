@@ -13,9 +13,9 @@
  * stated at the moment of the click.
  */
 
-import { decryptRecord, deviceIdBytes, fromBase64Url } from '@siot/crypto';
+import { deviceIdBytes } from '@siot/crypto';
 import { fetchRecords } from './api.js';
-import { openKeyRing } from './record-keys.js';
+import { openKeyRing, openRawRecord } from './record-keys.js';
 import {
   EXPORT_PAGE_SIZE,
   buildCsvExport,
@@ -50,14 +50,13 @@ export async function exportDeviceRecords(entry, { format, onProgress, signal })
             ...(afterSeq === undefined ? {} : { afterSeq }),
           })
         ).records,
-      openRecord: async (raw) =>
-        decryptRecord({
-          dataKey: await ring.keyFor(raw.seq),
-          deviceId: idBytes,
-          seq: BigInt(raw.seq),
-          nonce: fromBase64Url(raw.nonce),
-          ciphertext: fromBase64Url(raw.ciphertext),
-        }),
+      // Same opener as the Readings section, so a notification is a notification
+      // in the file as well as on screen (roadmap 10.3).
+      openRecord: async (raw) => {
+        const opened = await openRawRecord(ring, idBytes, raw);
+        if (opened.error !== null) throw new Error(opened.error);
+        return opened;
+      },
     });
 
     const unopened = records.filter((record) => record.error !== null).length;

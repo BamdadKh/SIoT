@@ -237,6 +237,16 @@ function normaliseDeviceEntry(entry) {
       pendingBad = 1;
     }
   }
+  // Roadmap 10.4: absent until something has been marked read, and a value that
+  // will not parse is treated as absent, which errs towards showing a
+  // notification as unread again rather than hiding one nobody saw.
+  if (entry.notifications_seen_through !== undefined) {
+    try {
+      device.notifications_seen_through = assertThroughSeq(entry.notifications_seen_through);
+    } catch {
+      // Not counted: unlike a dropped secret, nothing is lost but a read mark.
+    }
+  }
   // Roadmap 11.2: starts at 1 because a fresh device's high-water mark is 0.
   device.nextCommandSeq =
     Number.isSafeInteger(entry.nextCommandSeq) && entry.nextCommandSeq >= 1 ? entry.nextCommandSeq : 1;
@@ -269,6 +279,44 @@ export function reserveCommandSeq(doc, deviceId) {
         d.id === deviceId ? { ...d, nextCommandSeq: commandSeq + 1 } : d,
       ),
     },
+  };
+}
+
+/**
+ * Marks a device's notifications read up to and including `seq` (roadmap 10.4).
+ *
+ * Read state lives here, in the vault, and not on the server. "This account read
+ * the smoke alarm alert at 03:12" is a fact about a person, and the server
+ * already holds the arrival time of the alert; a read flag beside it would turn
+ * the pair into a record of when someone was awake and looking. Here it is one
+ * more opaque vault write, the same size class and the same route as a rename.
+ *
+ * A high-water `seq` rather than a set of read ids, because notifications and
+ * readings share one sequence (10.2) and the mark is then one number per device
+ * however many alerts arrive. It only moves forward: marking an older position
+ * returns the document unchanged, so a stale tab cannot un-read something a
+ * newer one already marked, and a caller can compare identity to skip the write.
+ *
+ * @param {{ devices: Array }} doc
+ * @param {string} deviceId base64url
+ * @param {string} seq uint64 as a decimal string
+ */
+export function markNotificationsSeen(doc, deviceId, seq) {
+  const entry = findDevice(doc, deviceId);
+  if (!entry) throw new Error('no such device in the vault');
+  const mark = assertThroughSeq(seq);
+  if (
+    entry.notifications_seen_through !== undefined &&
+    BigInt(mark) <= BigInt(entry.notifications_seen_through)
+  ) {
+    return doc;
+  }
+  return {
+    ...doc,
+    v: VAULT_DOCUMENT_VERSION,
+    devices: listDevices(doc).map((device) =>
+      device.id === deviceId ? { ...device, notifications_seen_through: mark } : device,
+    ),
   };
 }
 

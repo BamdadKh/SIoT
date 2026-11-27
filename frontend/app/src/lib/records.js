@@ -115,6 +115,46 @@ export function readPayload(payload) {
 }
 
 /**
+ * Any opened record, whichever kind it turned out to be (roadmap 10.3).
+ *
+ * A record is a reading or a notification, and which one is known only after it
+ * opens: the server is never told (ROADMAP 10.0). Everything that reads records
+ * (Readings, the dashboard, the export, the notification list) goes through this
+ * one function so they cannot disagree about what a record holds.
+ *
+ * A notification carries no readings. It is returned with an empty `readings`
+ * and `problem: null`, which is what lets the dashboard step over it without
+ * breaking a graph: nothing is missing from the sequence, the device simply said
+ * something that was not a measurement. A notification that opened under the
+ * notify key and failed `validateNotification` keeps `notification: null` and is
+ * said to be unrenderable, never partly rendered.
+ *
+ * @param {{ kind?: string|null, payload: unknown, notification?: object|null,
+ *           error: string|null }} record
+ * @returns {{ kind: 'unopened'|'reading'|'notification', deviceTime: number|null,
+ *             readings: Array<{ key: string, value: unknown }>, unsupported: string[],
+ *             problem: string|null, notification: object|null }}
+ */
+export function readRecord(record) {
+  const none = { deviceTime: null, readings: [], unsupported: [], problem: null, notification: null };
+  if (record.error) return { ...none, kind: 'unopened' };
+
+  if (record.kind === 'notification') {
+    return {
+      ...none,
+      kind: 'notification',
+      deviceTime: record.notification?.deviceTime ?? null,
+      notification: record.notification ?? null,
+    };
+  }
+  if (record.kind === 'malformed-notification') {
+    return { ...none, kind: 'notification' };
+  }
+
+  return { ...readPayload(record.payload), notification: null, kind: 'reading' };
+}
+
+/**
  * One reading value as text.
  *
  * `bigint` is not a hypothetical: the CBOR decoder hands back a `bigint` for any

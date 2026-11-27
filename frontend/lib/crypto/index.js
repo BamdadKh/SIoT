@@ -41,6 +41,14 @@ export {
 export { sealGrant, openGrant, GRANT_AAD_LABEL, GRANT_BLOB_BYTES } from './grant.js';
 export { encodeCbor, decodeCbor } from './cbor.js';
 export {
+  buildNotificationPayload,
+  validateNotification,
+  openAnyRecord,
+  NOTIFICATION_TYPE,
+  NOTIFICATION_MESSAGE_MAX_BYTES,
+  SEVERITIES,
+} from './notification.js';
+export {
   encryptCommand,
   decryptCommand,
   commandAad,
@@ -72,6 +80,8 @@ export {
   setPendingSecret,
   promotePendingSecret,
   secretForSeq,
+  markNotificationsSeen,
+  reserveCommandSeq,
   removeDevice,
   deviceSecretBytes,
   deviceIdBytes,

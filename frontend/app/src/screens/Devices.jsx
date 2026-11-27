@@ -5,6 +5,8 @@ import { Link } from '../lib/router.jsx';
 import { TopBar } from '../components/TopBar.jsx';
 import { RollbackWarning } from '../components/RollbackWarning.jsx';
 import { OrphanNote, UnregisteredNote } from '../components/DeviceStateNote.jsx';
+import { Notifications } from '../components/Notifications.jsx';
+import { useNotifications } from '../lib/use-notifications.js';
 
 /**
  * The signed-in, unlocked home: every device, named from the vault and dated
@@ -21,6 +23,10 @@ import { OrphanNote, UnregisteredNote } from '../components/DeviceStateNote.jsx'
  */
 export function Devices({ username, onSignOut, signingOut }) {
   const [state, reload] = useVaultDevices(username);
+  // Roadmap 10.4: fetched on open and polled while open, from the same vault
+  // load the list uses, so the names and read marks cannot disagree with it.
+  const notifications = useNotifications(state);
+  const unreadBy = unreadByDevice(notifications.merged);
 
   return (
     <>
@@ -93,11 +99,16 @@ export function Devices({ username, onSignOut, signingOut }) {
                 <DeviceRow
                   key={device.id}
                   device={device}
+                  unread={unreadBy.get(device.id) ?? 0}
                   vaultDocument={state.document}
                   onRegistered={reload}
                 />
               ))}
             </ul>
+          ) : null}
+
+          {state.status === 'ok' && state.devices.length > 0 ? (
+            <Notifications username={username} notifications={notifications} onMarked={reload} />
           ) : null}
         </div>
       </main>
@@ -119,7 +130,7 @@ export function Devices({ username, onSignOut, signingOut }) {
  * here, and the server cannot forge a newer record at a higher `seq` but can
  * always withhold one. So the honest claim is when something last arrived.
  */
-function DeviceRow({ device, vaultDocument, onRegistered }) {
+function DeviceRow({ device, unread, vaultDocument, onRegistered }) {
   return (
     <li className={`device${device.state === ORPHAN ? ' device-orphan' : ''}`}>
       <div className="device-identity">
@@ -135,6 +146,13 @@ function DeviceRow({ device, vaultDocument, onRegistered }) {
         <span className="small" title={exactLastSeen(device.lastSeenAt)}>
           {device.state === UNREGISTERED ? 'Not registered' : describeLastSeen(device.lastSeenAt)}
         </span>
+        {/* Only when there is something to say: a row reading "0 unread" on every
+            quiet device would be the list claiming each one has no alerts. */}
+        {unread > 0 ? (
+          <span className="small device-unread">
+            {unread === 1 ? '1 unread notification' : `${unread} unread notifications`}
+          </span>
+        ) : null}
       </div>
 
       {device.state === UNREGISTERED ? (
@@ -148,4 +166,13 @@ function DeviceRow({ device, vaultDocument, onRegistered }) {
       {device.state === ORPHAN ? <OrphanNote /> : null}
     </li>
   );
+}
+
+/** @param {Array<{ deviceId: string, unread: boolean }>} merged */
+function unreadByDevice(merged) {
+  const counts = new Map();
+  for (const item of merged) {
+    if (item.unread) counts.set(item.deviceId, (counts.get(item.deviceId) ?? 0) + 1);
+  }
+  return counts;
 }
