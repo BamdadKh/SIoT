@@ -221,9 +221,10 @@ mechanism exists that is no weaker than the password itself.
   phone, with notifications raised by constantly polling the server and decrypting on the phone,
   so no push service is involved ([Phase 13](ROADMAP.md)).
 - **Hiding packet timing.** An optional per-device setting that keeps a constant stream going,
-  carrying real data when there is some and an indistinguishable cover record when there is not,
-  so the server cannot tell when something happened. It costs power, storage and latency, and it
-  does not hide your own actions, such as sending an instruction
+  carrying real data when there is some and an encrypted, timestamped heartbeat when there is
+  not. The server cannot tell when something happened, and your client can notice records that
+  arrive late or go missing. It costs power, storage and latency, and it does not hide your own
+  actions, such as sending an instruction
   ([Section 13.2](SIoT_Design_Document.md#132-constant-rate-uploads-planned-optional)).
 
 ## Contributing

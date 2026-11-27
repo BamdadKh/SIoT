@@ -476,7 +476,7 @@ Whatever is chosen, the recovery credential must be at least as strong as the pa
 | Unverified web client code | For anyone without the extension, a server that swaps the client JavaScript can read the password and vault at the next sign-in or unlock. Cryptography cannot stop the party that ships the crypto code (Section 10) |
 | Approving a malicious client update | With the extension, the user's review is the last check. Mitigated by a minimal trusted core that keeps prompts rare and small, delegated review, and a public transparency log (10.3, 10.4) |
 | **Metadata leakage** | Inherent to the architecture and significant for IoT (see below) |
-| **Availability and withholding** | The server can refuse, stall, or delete. Cryptography detects lies but cannot compel service |
+| **Availability and withholding** | The server can refuse, stall, or delete. Cryptography detects lies but cannot compel service. Heartbeats (13.2) would make delay and withholding of device records noticeable |
 | **Compromised device holding a grant** | Reads everything the grant covers, including full history; revocation requires physical re-provisioning (Section 9.3) |
 
 ### 13.1 Metadata leakage
@@ -489,15 +489,27 @@ Partial mitigations exist and none are free. All trade power consumption, storag
 
 ### 13.2 Constant-rate uploads (planned, optional)
 
-A per-device setting that hides **when something happened** from the server. The device uploads on a fixed schedule whether or not it has anything to say: each slot carries real data if some is waiting, and a cover record if not. The server sees an unchanging stream and cannot tell which slots mattered. Not built yet (roadmap 9.4).
+A per-device setting that hides **when something happened** from the server, and shows the reader when records are being **delayed or withheld**. The device uploads on a fixed schedule whether or not it has anything to say: each slot carries real data if some is waiting, and a heartbeat if not. A heartbeat is an encrypted, sequential, timestamped record with nothing else to report. The server sees an unchanging stream and cannot tell which slots mattered. Not built yet (roadmap 9.4).
 
 The setting only works if all of these hold:
 
-- **A cover record is an ordinary record.** It is sealed and signed like any other, takes the next `seq` from the same counter (7.1), and is marked as cover only inside the ciphertext, for the same reason a notification's type is. Literal random bytes would pass the server's checks, but a reader could not tell them from a corrupted or tampered record.
-- **Every record is the same size.** Readings, notifications and cover records are padded to one length inside the plaintext. Otherwise size says what timing no longer does.
+- **A heartbeat is an ordinary record.** It is sealed and signed like any other, takes the next `seq` from the same counter (7.1), carries the device's timestamp, and is marked as a heartbeat only inside the ciphertext, for the same reason a notification's type is. Random filler would not do: it says nothing about time, and a reader could not tell it from a corrupted or tampered record.
+- **Everything is one size, large enough that nothing stands out.** Heartbeats, readings, notifications and instructions are padded inside the plaintext to a single ciphertext length. That length is set by the largest real payload, so a heartbeat is as big as real data or an instruction, never a small ping. A payload that does not fit is refused, never sent oversized. Today an instruction's ciphertext may reach 1024 bytes and a record's 4 KiB, so the chosen length has to cover those limits or lower them. Otherwise size says what timing no longer does.
 - **The schedule never reacts to data.** Real data waits for the next slot, including an alert. A burst is queued, combined or dropped, never sent faster, and retries must not add traffic that depends on what is being sent. The cost is that an alert can be late by up to one interval, or longer behind a queue.
 
-What it does not hide: that the device exists, its interval, when it is offline, and when it reboots (`boot_epoch` is visible in `seq`). It covers only the device's record uploads. The timing of a person's own actions, such as sending a command, writing the vault after reading an alert, or opening a dashboard, is still visible, as are source addresses and the grant graph. A server that cannot tell cover records apart also cannot prune them, so they are stored like everything else.
+**What the reader can detect.** The client knows the interval, so it knows what should have arrived:
+
+- a missing `msg_counter` inside a boot is a record that was withheld or lost;
+- a newest record older than the interval plus some slack, measured against the reader's own clock, means the stream is late or has stopped;
+- a hole in the timestamps across a reboot shows records missing from the end of the earlier boot, which `seq` alone cannot show (7.1).
+
+The server's arrival times are not evidence here, since the server writes them. This is detection, not prevention, and only while a client is looking. It cannot say who is at fault: a withholding server, a dropped network and a flat battery look the same, so it is worded as a signal (5.6). Judging age by timestamp needs a device clock the server cannot steer, and a clockless device sends `t = 0`; what a client can claim for such a device is an open point.
+
+**This covers the path from device to reader.** The server holds no key, so it cannot produce heartbeats towards a device, and a delayed command (roadmap 11.3) needs its own check. One candidate, not yet decided: a command names the `seq` of the newest record its sender has seen, and the device refuses it if that is more than a few intervals behind. This needs no clock, and a server that holds back either the command or the heartbeats only makes the command look older.
+
+**Equal size alone does not hide an instruction.** Instructions use their own route and travel the other way, so the server can tell one from a record whatever its length. Padding hides which kind of instruction it is. Hiding that one was sent at all would also need a constant stream in that direction, with filler instructions from a client that stays running (an always-on phone, for instance). Open (roadmap, Open Risks).
+
+What it does not hide: that the device exists, its interval, when it is offline, and when it reboots (`boot_epoch` is visible in `seq`). It covers only the device's record uploads. The timing of a person's own actions, such as sending a command, writing the vault after reading an alert, or opening a dashboard, is still visible, as are source addresses and the grant graph. A server that cannot tell heartbeats apart also cannot prune them, so they are stored like everything else.
 
 ---
 
@@ -544,7 +556,7 @@ The architecture is settled in shape. These remain genuinely open and should be 
 2. **Extension enforcement under Manifest V3** (Section 10.1) — whether CSP + SRI can carry the guarantee that blocking `webRequest` no longer provides.
 3. **Extension distribution** (Section 10.1) — self-hosted versus Web Store, trading the no-auto-update property against adoption.
 4. **Account recovery** (Section 12) — whether any mechanism can meet the bar of being no weaker than the password.
-5. **Constant-rate uploads** (Section 13.2): the setting is planned. Open are the intervals and record size offered, whether it is set in the sketch or from the dashboard, and whether any device class has it on by default.
+5. **Constant-rate uploads** (Section 13.2): the setting is planned. Open are the intervals and record size offered, whether it is set in the sketch or from the dashboard, whether any device class has it on by default, where a trusted device clock comes from, and whether commands cite a heartbeat to bound their delay.
 6. **Vault record granularity** — one blob versus per-record encryption, affecting sync cost and how precisely `vault_version` rollback can be detected.
 7. **Rollback resolution path** (Section 8) — a caught rollback currently has no way past it short of the server serving a newer version again. Whether a deliberate, friction-heavy "accept this older version anyway" control belongs in the client, and if so what it should cost the person choosing it.
 8. **Trusted-core isolation** (Section 10.3): what boundary keeps the UI from touching key material (a separate origin, a sandboxed iframe, a Worker), given that the core must stay small enough to review by hand.
@@ -580,4 +592,5 @@ The architecture is settled in shape. These remain genuinely open and should be 
 | Client verification made precise | 10, 10.0, 10.2 to 10.6, 13 | The extension verifies the client code the browser receives, not the server; reproducible builds, the extension's own update channel, review fatigue, targeted attacks and prior work (Code Verify) are now stated. The claim that the zero-knowledge guarantees hold equally without the extension was wrong and is corrected |
 | "No open decisions remaining" replaced | 15 | Six were outstanding |
 | Constant-rate uploads specified as a planned optional setting | 13.2, 15 | Upload timing leaks events to a passive server even though payloads are sealed |
+| Empty slots carry encrypted, timestamped heartbeats | 13, 13.2, 15 | The same stream that hides timing also shows a reader that records are late or missing |
 | Mobile app recorded as planned, notifying by polling; web and phone both send instructions to devices | 14.1, 15 | States the direction before it is designed |

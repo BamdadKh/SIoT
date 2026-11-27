@@ -1198,15 +1198,20 @@ Phase 3.2 is done. Phase 3 is not: 3.3 (password change) is next.
 ### 9.4 Constant-rate uploads (optional per device)
 
 > Design 13.2. A setting that hides packet timing from the server: the device sends a constant
-> stream, carrying real data when there is some and a cover record when there is not.
+> stream, carrying real data when there is some and a heartbeat when there is not. A heartbeat is
+> encrypted, sequential and timestamped, so the same stream shows a reader that records are being
+> delayed or withheld.
 
 - [ ] Decide the intervals and the fixed record size on offer, and the power and storage cost of each. A small set of choices, so an unusual interval does not identify a device
 - [ ] Decide where it is set: in the sketch, or from the dashboard (which needs Phase 11, and the act of changing it is itself visible)
-- [ ] Define the cover record and the padding, type marker inside the ciphertext only, and publish both in `docs/protocol.md` with vectors
-- [ ] Pad readings and notifications to the same size as cover records
-- [ ] Firmware: send on a timer that data never moves. Real data waits for a slot (alerts included), bursts never raise the rate, retries add no data-dependent traffic, and cover records draw `seq` from the same counter as everything else
-- [ ] Client: leave cover records out of readings, dashboard and notifications without reporting them as gaps or unopenable records; decide how the export treats them
-- [ ] Client: stop assuming the newest page holds recent alerts (10.4 reads 50 records per device, which a fast constant stream fills with cover records)
+- [ ] Define the heartbeat record (timestamp, type marker inside the ciphertext only) and the padding, and publish both in `docs/protocol.md` with vectors
+- [ ] Pad heartbeats, readings, notifications and instructions to one ciphertext size, large enough for the largest real payload so a heartbeat looks like data or an instruction. Anything larger is refused. The current ceilings are 1024 bytes for an instruction and 4 KiB for a record, and the firmware's buffers have to fit whatever is chosen
+- [ ] Firmware: send on a timer that data never moves. Real data waits for a slot (alerts included), bursts never raise the rate, retries add no data-dependent traffic, and heartbeats draw `seq` from the same counter as everything else
+- [ ] Client: leave heartbeats out of readings, dashboard and notifications without reporting them as gaps or unopenable records; decide how the export treats them
+- [ ] Client: report a missing counter, a stale newest record (against the browser's own clock, not the server's arrival time) and a timestamp hole across a reboot. Worded as a signal, never as blame on the server or the device
+- [ ] Decide where a device gets a clock the server cannot steer (plain NTP is unauthenticated), and what is claimed for a device with none
+- [ ] Decide whether a command cites the newest `seq` its sender saw, with the device refusing old ones (design 13.2; the open decision in 11.3)
+- [ ] Client: stop assuming the newest page holds recent alerts (10.4 reads 50 records per device, which a fast constant stream fills with heartbeats)
 - [ ] Test: from the server's side, a run with events and a run without are indistinguishable in size, count and schedule
 
 ### 9.5 Flash encryption documentation
@@ -1477,7 +1482,8 @@ its own phase, not an item folded in here.
 > strings; and the three working buffers are heap-allocated because ~3.7 KB on the 8 KB loop
 > task stack alongside TLS state was too tight to trust.
 
-> **Open decision: command freshness.** The untrusted server can withhold a command and deliver it
+> **Open decision: command freshness** (ask the project owner before deciding, see Open Risks;
+> a candidate is in 9.4). The untrusted server can withhold a command and deliver it
 > later, and the device will run it if its `command_seq` is above the mark. `command_seq` stops
 > replay, not delay. Requiring `seq == mark + 1` was rejected because one lost command would wedge
 > the device for good. The candidate fix is an `expires_at` inside the ciphertext, honoured only
@@ -1647,6 +1653,20 @@ server still cannot tell an alert from a reading) and involves no third-party pu
 - [ ] Never present silence as "no alerts" (the 10.4 rule): a stopped poll, a withholding server and a quiet device look the same
 - [ ] Send instructions to owned devices through Phase 11, limited to the command types the device's schema declares (11.5). Sending needs `device_command_key`, a live session and a vault write for `command_seq`, which is more than receiving alerts needs. Decide whether it requires unlocking the vault each time, so that a phone holding only notify keys cannot actuate anything
 - [ ] Settle 11.3's command freshness decision first: a server can deliver a command late, and a phone user is likely to send one and walk away
+
+---
+
+## Open Risks: Ask Before Deciding
+
+> **When work reaches one of these, stop and ask the project owner, and bring a proposal.** The
+> owner's expectation is that these can probably be solved with more encryption. None is decided.
+
+- [ ] Metadata that constant-rate uploads (9.4) do not hide: the timing of a person's own actions, source addresses, device count, reboots and offline periods, and the grant graph
+- [ ] Withholding and deletion: heartbeats (9.4) would detect missing records, but nothing stops the server withholding them or recovers what it deleted
+- [ ] Physical access to a board: `DEVICE_SECRET` is readable unless NVS encryption is on, which flash encryption alone does not provide. The firmware half is unbuilt (9.5, design 6.2, `docs/hardening.md`)
+- [ ] A compromised device holding a grant: it reads everything the grant covers, and revoking means rotating and re-provisioning (design 9.3)
+- [ ] Delayed commands (11.3), if the citation proposed in 9.4 is not adopted
+- [ ] Hiding that an instruction was sent: padding (9.4) makes sizes match, but instructions use their own route, so this needs a constant stream towards the device from a client that stays running
 
 ---
 
